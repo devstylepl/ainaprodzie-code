@@ -28,9 +28,12 @@ import app.retrofit.organization.CallerLookup;
 
 /// The read side of tickets for every caller, the REST API included (ADR 0001). Visibility is
 /// enforced here and nowhere else.
+///
+/// Public because the chat's tools call [#list(Caller, TicketFilter, TicketPageRequest)] and
+/// [#find(Caller, String)] from outside this package, always for the signed-in user its question looked up.
 @Service
 @Transactional(readOnly = true)
-class TicketQueries {
+public class TicketQueries {
 
 	/// Tickets with their organization, the two instants the SLA compares, named `sla.response_deadline` and
 	/// `sla.waiting_until`, and the time of an unanswered customer comment, `unanswered.commented_at` (null when
@@ -91,7 +94,12 @@ class TicketQueries {
 	}
 
 	TicketPage list(UUID callerId, TicketFilter filter, TicketPageRequest pageRequest) {
-		var query = new Conditions(callers.current(callerId), clock.instant());
+		return list(callers.current(callerId), filter, pageRequest);
+	}
+
+	/// As [#list(UUID, TicketFilter, TicketPageRequest)] for a caller the operation has already looked up.
+	public TicketPage list(Caller caller, TicketFilter filter, TicketPageRequest pageRequest) {
+		var query = new Conditions(caller, clock.instant());
 		if (filter.text() != null) {
 			var reference = TicketReference.parse(filter.text());
 			if (reference.isPresent()) {
@@ -219,7 +227,7 @@ class TicketQueries {
 	}
 
 	/// As [#find(UUID, String)] for a caller the operation has already looked up.
-	Optional<TicketDetails> find(Caller caller, String reference) {
+	public Optional<TicketDetails> find(Caller caller, String reference) {
 		var parsed = TicketReference.parse(reference);
 		if (parsed.isEmpty()) {
 			return Optional.empty();

@@ -1,7 +1,9 @@
 package app.retrofit.ticket;
 
 /// The order of a ticket list; ties fall back to the newest reference first.
-enum TicketSort {
+///
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public enum TicketSort {
 
 	RECENTLY_UPDATED,
 

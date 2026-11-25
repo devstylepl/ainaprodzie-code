@@ -1,4 +1,4 @@
-/// The chat: a model answers the signed-in user's questions about the app, without tools and without reading tickets.
+/// The read-only chat: a model answers questions about tickets through tools that read them as the signed-in user.
 /// Nothing outside this package depends on it (chat ADR 0001).
 @NullMarked
 package app.retrofit.chat;

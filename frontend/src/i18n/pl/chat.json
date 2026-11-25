@@ -3,14 +3,41 @@
   "title": "Czat",
   "close": "Zamknij czat",
   "newConversation": "Nowa rozmowa",
-  "noTicketAccess": "Czat nie widzi twoich zgłoszeń.",
+  "readOnly": "Czat tylko odczytuje zgłoszenia.",
   "empty": {
-    "title": "Zapytaj czat",
-    "hint": "Pytaj zwykłym językiem i dopytuj o jego odpowiedzi. Czat odpowiada z wiedzy ogólnej, nie ze zgłoszeń."
+    "title": "Zapytaj o swoje zgłoszenia",
+    "hint": "Pytaj zwykłym językiem o zgłoszenia, które możesz zobaczyć: ich status, SLA i czas oczekiwania."
   },
+  "prompts": {
+    "USER": {
+      "waiting": "Które nasze zgłoszenia czekają na naszą odpowiedź?",
+      "oldest": "Jak długo czeka nasze najstarsze otwarte zgłoszenie?",
+      "resolved": "Które nasze zgłoszenia są rozwiązane, ale nie zamknięte?"
+    },
+    "SUPPORT": {
+      "breached": "Które nowe zgłoszenia przekroczyły SLA?",
+      "assigned": "Co jest przypisane do mnie?",
+      "organization": "Które zgłoszenia Acme Corp czekają na klienta?"
+    }
+  },
+  "ticketPrompts": {
+    "USER": {
+      "status": "Na jakim etapie jest to zgłoszenie?"
+    },
+    "SUPPORT": {
+      "summary": "Podsumuj to zgłoszenie",
+      "waiting": "Na co czeka klient?"
+    }
+  },
+  "ticketContext": {
+    "label": "Pytasz o {{reference}}",
+    "dismiss": "Przestań pytać o {{reference}}"
+  },
+  "askedOn": "przy {{reference}}",
   "composer": {
     "label": "Twoje pytanie",
-    "placeholder": "Zadaj pytanie",
+    "placeholder": "Zapytaj o zgłoszenia",
+    "ticketPlaceholder": "Zapytaj o {{reference}}",
     "send": "Wyślij",
     "stop": "Zatrzymaj"
   },
@@ -19,31 +46,101 @@
     "chat": "Czat"
   },
   "pending": "Przygotowuję odpowiedź…",
+  "reasoning": {
+    "thinking": "Rozumuję",
+    "thought": "Rozumowanie trwało {{seconds}} s",
+    "show": "Pokaż rozumowanie"
+  },
+  "showInList": "Pokaż je na liście",
   "stopped": "Zatrzymano przed końcem odpowiedzi.",
+  "answerTickets": {
+    "label": "Zgłoszenia w tej odpowiedzi",
+    "showAll": "Pokaż wszystkie ({{count}})",
+    "showFewer": "Pokaż mniej"
+  },
   "errors": {
     "rate-limited": "Za dużo pytań naraz. Poczekaj chwilę i spróbuj ponownie.",
     "unavailable": "Czat jest teraz niedostępny. Spróbuj później.",
     "timeout": "Odpowiedź trwała zbyt długo.",
-    "personal-data-blocked": "Czat nie wysłał tego pytania: rozmowa zawiera dane osobowe, które nie mogą trafić do modelu, na przykład numer karty. Usuń je z pytania i zapytaj ponownie albo zacznij nową rozmowę, jeśli są we wcześniejszej odpowiedzi.",
+    "guardrails-blocked": "Czat nie wysłał tego pytania: rozmowa zawiera dane osobowe, które nie mogą trafić do modelu, na przykład numer karty. Usuń je z pytania i zapytaj ponownie albo zacznij nową rozmowę, jeśli są we wcześniejszej odpowiedzi.",
     "failed": "Czat nie potrafił odpowiedzieć na to pytanie.",
     "request": "Nie udało się wysłać pytania."
+  },
+  "tools": {
+    "searchTickets": "Szukam zgłoszeń",
+    "getTicket": "Czytam zgłoszenie {{reference}}",
+    "getTicketUnnamed": "Czytam zgłoszenie",
+    "unknown": "Używam narzędzia {{tool}}"
+  },
+  "criteria": {
+    "text": "tekst „{{value}}”",
+    "statuses": "status {{value}}",
+    "categories": "kategoria {{value}}",
+    "priorities": "priorytet {{value}}",
+    "slaBreached": "SLA przekroczone",
+    "withinSla": "w terminie SLA",
+    "assignedToMe": "przypisane do mnie",
+    "raisedByMe": "zgłoszone przeze mnie",
+    "organization": "organizacja {{value}}",
+    "team": "zespół {{value}}",
+    "longestWaiting": "najdłużej czekające najpierw",
+    "createdFrom": "utworzone od {{value}}",
+    "createdTo": "utworzone przed {{value}}",
+    "deadlineBefore": "termin odpowiedzi przed {{value}}"
   },
   "settings": {
     "link": "Ustawienia",
     "title": "Ustawienia",
-    "subtitle": "Jakiego modelu używa czat i jak jego ślady trafiają do Phoenix.",
+    "subtitle": "Jakiego modelu używa czat, co robi, gdy dostawca zawiedzie, czy model rozumuje przed odpowiedzią, kto może czytać z niego dane osobowe i jak jego ślady trafiają do Phoenix.",
     "model": {
       "title": "Model",
       "sentence": "Każde pytanie z czatu trafia do tego aliasu LiteLLM; plik litellm/config.yaml przypisuje mu model dostawcy.",
       "chosen": "Pytania z czatu trafiają teraz do {{model}}.",
       "notLoaded": "Nie udało się wczytać listy modeli."
     },
+    "fallback": {
+      "title": "Model zapasowy",
+      "options": {
+        "off": "Wyłączony",
+        "afterRetry": "Po ponowieniu",
+        "atOnce": "Od razu"
+      },
+      "sentences": {
+        "off": "Wyłączony: gdy dostawca modelu zawiedzie albo odpowiada zbyt wolno, pytanie jest ponawiane, a jeśli i to się nie uda, odpowiedź kończy się błędem.",
+        "afterRetry": "Po ponowieniu: gdy dostawca modelu zawiedzie albo odpowiada zbyt wolno, LiteLLM ponawia wywołanie raz, a potem wysyła pytanie do modelu zapasowego, który plik litellm/config.yaml wskazuje dla aliasu, jeśli taki jest.",
+        "atOnce": "Od razu: gdy dostawca modelu zawiedzie albo odpowiada zbyt wolno, LiteLLM wysyła pytanie do modelu zapasowego, który plik litellm/config.yaml wskazuje dla aliasu, jeśli taki jest, bez ponawiania."
+      },
+      "states": {
+        "off": "wyłączony",
+        "afterRetry": "ustawiony na „po ponowieniu”",
+        "atOnce": "ustawiony na „od razu”"
+      }
+    },
+    "reasoning": {
+      "title": "Rozumowanie",
+      "options": {
+        "off": "Wyłączone",
+        "medium": "Średnie",
+        "high": "Wysokie"
+      },
+      "sentences": {
+        "off": "Wyłączone: czat nie prosi modelu o rozumowanie przed odpowiedzią.",
+        "medium": "Średnie: czat prosi model o rozumowanie przed odpowiedzią, na średnim poziomie.",
+        "high": "Wysokie: czat prosi model o rozumowanie przed odpowiedzią, na wysokim poziomie. Odpowiedź trwa dłużej i kosztuje więcej tokenów."
+      },
+      "states": {
+        "off": "wyłączone",
+        "medium": "ustawione na „średnie”",
+        "high": "ustawione na „wysokie”"
+      }
+    },
     "traces": {
       "title": "Ślady aplikacji w Phoenix",
       "on": "Włączone",
       "off": "Wyłączone",
-      "onSentence": "Włączone: aplikacja wysyła też własne odcinki śladu, a każde pytanie widać jako jeden ślad z odcinkami aplikacji i wywołaniami modelu przez LiteLLM.",
-      "offSentence": "Wyłączone: ślady wysyła tylko LiteLLM, po jednym na wywołanie modelu, z modelem dostawcy i jego kosztem, ale bez odcinków śladu aplikacji."
+      "onMaskedSentence": "Włączone: aplikacja wysyła też własne odcinki śladu, zamaskowane przez Presidio, a każde pytanie widać jako jeden ślad z krokami narzędzi i wywołaniami modelu przez LiteLLM.",
+      "onUnmaskedSentence": "Włączone: aplikacja wysyła też własne odcinki śladu, niezamaskowane, bo „Maskuj dane osobowe w aplikacji” jest wyłączone, a każde pytanie widać jako jeden ślad z krokami narzędzi i wywołaniami modelu przez LiteLLM.",
+      "offSentence": "Wyłączone: ślady wysyła tylko LiteLLM, po jednym na wywołanie modelu, z modelem dostawcy i jego kosztem, ale bez kroków narzędzi między wywołaniami."
     },
     "join": {
       "title": "Grupuj wywołania LiteLLM dla wiadomości czatu",
@@ -57,7 +154,14 @@
       "offSentence": "Wyłączone: odcinek aplikacji dla wywołania modelu to zwykły krok, więc tokeny i koszt każdego wywołania liczy raz odcinek LiteLLM.",
       "lockedSentence": "Gdy ślady aplikacji są wyłączone, aplikacja nie wysyła odcinków, więc to ustawienie działa tylko, gdy są włączone."
     },
+    "presidio": {
+      "title": "Maskuj dane osobowe w aplikacji",
+      "mechanism": "Presidio",
+      "onSentence": "Włączone: aplikacja zastępuje osoby, które zna, znacznikami, np. <PERSON_1>, zanim przeczyta je model, i maskuje własne odcinki śladu, zanim wyjdą. Adresy e-mail, numery telefonów, IBAN i PESEL maskuje guardrail LiteLLM, niezależnie od tego ustawienia.",
+      "offSentence": "Wyłączone: nazwiska i inne dane osobowe trafiają do dostawcy modelu tak, jak zostały napisane, a Phoenix pokazuje je w śladach LiteLLM. Tylko guardrail LiteLLM maskuje adresy e-mail, numery telefonów, IBAN i PESEL oraz odrzuca żądanie z numerem karty, a własne odcinki śladu aplikacji też wychodzą niezamaskowane, gdy ślady aplikacji są włączone."
+    },
     "groups": {
+      "personalData": "Dane osobowe",
       "tracing": "Śledzenie w Phoenix"
     },
     "flow": {
@@ -76,29 +180,40 @@
       "forms": {
         "sent": "Wysłane",
         "notSent": "Nie wysłane",
+        "placeholders": "Znaczniki",
+        "masked": "Zamaskowane",
         "asWritten": "W oryginale",
         "namesAsWritten": "Nazwiska w oryginale"
       },
       "hops": {
+        "appToPresidio": {
+          "sent": "Teksty odcinków śladu aplikacji, gdy ślady aplikacji są włączone, żeby zamaskować w nich dane osobowe. Pytania i wyniki narzędzi nie są wysyłane.",
+          "notSent": "Aplikacja o nic nie pyta Presidio."
+        },
         "appToLitellm": {
-          "asWritten": "Pytania tak, jak napisali je użytkownicy, razem z nazwiskami i innymi danymi osobowymi."
+          "placeholders": "Osoby, które zna aplikacja, jako znaczniki, np. <PERSON_1>; reszta bez zmian, tak jak napisali ją klienci.",
+          "asWritten": "Nazwiska i inne dane osobowe bez zmian, tak jak napisali je klienci."
         },
         "appToPhoenix": {
           "notSent": "Aplikacja nie wysyła odcinków śladu.",
+          "masked": "Odcinki śladu aplikacji, z danymi osobowymi zastąpionymi ich typem, np. <PERSON>.",
           "asWritten": "Odcinki śladu aplikacji razem z danymi osobowymi."
         },
         "litellmToPresidio": {
           "sent": "Każde żądanie, zanim trafi do dostawcy: guardrail LiteLLM."
         },
         "litellmToProvider": {
-          "namesAsWritten": "Nazwiska bez zmian. Guardrail maskuje adresy e-mail, numery telefonów, IBAN i PESEL, a numer karty powoduje odrzucenie żądania."
+          "placeholders": "Osoby jako znaczniki. Guardrail maskuje adresy e-mail, numery telefonów, IBAN i PESEL, a numer karty powoduje odrzucenie żądania.",
+          "placeholdersOrFallback": "Osoby jako znaczniki. Guardrail maskuje adresy e-mail, numery telefonów, IBAN i PESEL, a numer karty powoduje odrzucenie żądania. Gdy dostawca modelu zawiedzie, to samo żądanie trafia do dostawcy modelu zapasowego.",
+          "namesAsWritten": "Nazwiska bez zmian. Guardrail maskuje adresy e-mail, numery telefonów, IBAN i PESEL, a numer karty powoduje odrzucenie żądania.",
+          "namesAsWrittenOrFallback": "Nazwiska bez zmian. Guardrail maskuje adresy e-mail, numery telefonów, IBAN i PESEL, a numer karty powoduje odrzucenie żądania. Gdy dostawca modelu zawiedzie, to samo żądanie trafia do dostawcy modelu zapasowego."
         },
         "litellmToPhoenix": {
           "sent": "Każde wywołanie modelu w takiej postaci, w jakiej dostał je dostawca."
         }
       },
       "shapes": {
-        "perQuestionWithSteps": "Jeden ślad na pytanie: odcinki śladu aplikacji razem z wywołaniami modelu przez LiteLLM.",
+        "perQuestionWithSteps": "Jeden ślad na pytanie: kroki narzędzi aplikacji razem z wywołaniami modelu przez LiteLLM.",
         "perQuestionModelCalls": "Jeden ślad na pytanie, tylko z wywołaniami modelu przez LiteLLM.",
         "perModelCall": "Jeden ślad na każde wywołanie modelu, tylko z LiteLLM."
       }

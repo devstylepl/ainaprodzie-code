@@ -9,11 +9,13 @@ and so do the app's. It calls nothing further. The last user message chooses wha
     1x slow 20      the first attempt waits 20 seconds, the next answers at once
     2x slow 20      the first 2 attempts wait 20 seconds, the third answers at once; also 1x 500, 2x 429 and so on
 
-Anything else is answered at once. An answer reports usage as a real model would, the whole prompt and the answer
-counted in tokens, so the gateway's spend logs show what each attempt sent. Every request it receives is logged with the attempt number of its question, so
-`docker compose logs -f chaos-provider` shows how many times one question reached the provider. A question counts from
-1 again when it comes more than a few seconds after its answer, or after a pause longer than a turn (70s in
-application.yml): a retry follows within a second or two, a person asking again takes longer.
+Anything else is answered at once with the question, and the first such answer of a conversation adds how to make the
+provider misbehave, for someone who chose it without knowing. An answer reports usage as a real model would, the whole
+prompt and the answer counted in tokens, so the gateway's spend logs show what each attempt sent. Every request it
+receives is logged with the attempt number of its question, so `docker compose logs -f chaos-provider` shows how many
+times one question reached the provider. A question counts from 1 again when it comes more than a few seconds after its
+answer, or after a pause longer than a turn (70s in application.yml): a retry follows within a second or two, a person
+asking again takes longer.
 """
 
 import json
@@ -32,6 +34,10 @@ CHAOS = re.compile(r"(?:\b(\d+)\s*x\s*)?\b(slow (\d+)|429|500)\b", re.IGNORECASE
 QUIET = 75
 ASKED_AGAIN = 5
 CONTEXT = re.compile(r"^\s*<context>.*?</context>", re.DOTALL)
+HELP = (
+    "I am a fake provider: I call no model and answer as the question says. Ask 429 or 500 to fail every attempt, "
+    "slow 20 to answer after 20 seconds, or 1x 500 to fail only the first attempt."
+)
 # What OpenAI's tokenizer adds around each message and before the reply.
 MESSAGE_TOKENS = 3
 REPLY_TOKENS = 3
@@ -55,6 +61,11 @@ def content(message: dict) -> str:
 def tokens(text: str) -> int:
     """Roughly what a real model's tokenizer counts: about four characters of English per token."""
     return max(1, round(len(text) / 4)) if text else 0
+
+
+def first_question(body: dict) -> bool:
+    """Whether the conversation holds no answer yet: the chat sends its earlier answers with every question."""
+    return not any(message.get("role") == "assistant" for message in body.get("messages", []))
 
 
 def question(body: dict) -> str:
@@ -95,7 +106,10 @@ class Handler(BaseHTTPRequestHandler):
                 return log("  caller gave up before the answer")
         # An answer at the very moment the caller's timeout runs out may still be dropped and retried, so the count
         # starts again only for a request that comes later than a retry would.
-        if self.answer(body, f"chaos answered: {text}"):
+        reply = f"chaos answered: {text}"
+        if chaos is None and first_question(body):
+            reply += "\n\n" + HELP
+        if self.answer(body, reply):
             with lock:
                 answered[key] = time.monotonic()
 

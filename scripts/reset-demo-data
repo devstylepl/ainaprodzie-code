@@ -83,7 +83,7 @@ SQL
   echo '\echo Restarting the ticket numbers at 1001'
   echo 'ALTER TABLE ticket ALTER COLUMN number RESTART WITH 1001;'
   echo '\echo Seeding the demo data'
-  for file in demo-data.sql demo-data-created-audit.sql demo-data-link-audit.sql; do
+  for file in demo-data.sql demo-data-created-audit.sql demo-data-link-audit.sql demo-data-pesel.sql; do
     cat "$seed/$file"
     echo
   done

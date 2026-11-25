@@ -37,7 +37,7 @@ final class ChatErrors {
 					return ChatErrorCode.TIMEOUT;
 				}
 				case BadRequestException refusal when blockedByGuardrail(refusal) -> {
-					return ChatErrorCode.PERSONAL_DATA_BLOCKED;
+					return ChatErrorCode.GUARDRAILS_BLOCKED;
 				}
 				case InternalServerException _ -> {
 					return ChatErrorCode.UNAVAILABLE;
@@ -58,7 +58,7 @@ final class ChatErrors {
 		return message != null && message.startsWith(BLOCKED_BY_GUARDRAIL);
 	}
 
-	/// The model's answer cannot be shown: it has no text.
+	/// The model's answer cannot be shown: it has no text, or the model hit the tool-call limit.
 	static final class UnusableAnswer extends RuntimeException {
 
 		UnusableAnswer(String reason) {

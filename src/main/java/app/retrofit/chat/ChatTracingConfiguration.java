@@ -1,13 +1,17 @@
 package app.retrofit.chat;
 
+import java.net.URI;
+
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.http.okhttp.OpenAiHttpClientBuilderCustomizer;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.micrometer.tracing.opentelemetry.autoconfigure.SpanExporters;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.io.Resource;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
 
 import io.micrometer.observation.ObservationPredicate;
@@ -18,7 +22,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /// The chat's traces (chat ADR 0007). Spring AI's observations become spans through the Micrometer OpenTelemetry
 /// bridge, and Spring Boot exports them over OTLP to the endpoint in `application.yml`; the chat adds its attributes
-/// and texts to them, and keeps other requests out.
+/// and texts to them, keeps other requests out, and masks every batch before it leaves.
 @Configuration(proxyBeanMethods = false)
 class ChatTracingConfiguration {
 
@@ -39,7 +43,8 @@ class ChatTracingConfiguration {
 		return new StreamedCacheUsage();
 	}
 
-	/// Wraps the model Spring AI configures, so that every `ChatClient` built on it streams through [StreamedCacheUsage]. Static, as a post-processor must be, and with the filter looked up
+	/// Wraps the model Spring AI configures, so that every `ChatClient` built on it, the chat's and the evaluations'
+	/// judge's, streams through [StreamedCacheUsage]. Static, as a post-processor must be, and with the filter looked up
 	/// only when the model is created, so the post-processor brings nothing else up early.
 	@Bean
 	static BeanPostProcessor streamedCacheUsageModel(ObjectProvider<StreamedCacheUsage> cacheUsage) {
@@ -87,17 +92,27 @@ class ChatTracingConfiguration {
 		});
 	}
 
-	/// Replaces Spring Boot's list of exporters: every exporter, the OTLP one included, receives each batch only while
-	/// the stored switch exports the app's traces ([SwitchedSpanExporter]). The store is looked up only when a batch is
-	/// exported, so the tracer provider brings no datasource up early.
 	@Bean
-	SpanExporters spanExporters(ObjectProvider<SpanExporter> exporters, ObjectProvider<ChatSettingStore> settings) {
+	PresidioMasker presidioMasker(@Value("${retrofit.chat.presidio.analyzer-url}") URI analyzerUrl,
+			@Value("${retrofit.chat.presidio.anonymizer-url}") URI anonymizerUrl,
+			@Value("classpath:presidio/requests.yaml") Resource requests, JsonMapper json) {
+		return new PresidioMasker(analyzerUrl, anonymizerUrl, PresidioRequests.read(requests), json);
+	}
+
+	/// Replaces Spring Boot's list of exporters: every exporter, the OTLP one included, receives each batch only while
+	/// the stored switch exports the app's traces ([SwitchedSpanExporter]), after [MaskingSpanExporter] masked it once
+	/// while the app calls Presidio itself. The store is looked up only when a batch is exported, so the tracer provider
+	/// brings no datasource up early.
+	@Bean
+	SpanExporters spanExporters(ObjectProvider<SpanExporter> exporters, PersonalDataMasker masker,
+			ObjectProvider<ChatSettingStore> settings) {
 		var all = exporters.orderedStream().toList();
 		if (all.isEmpty()) {
 			return SpanExporters.of();
 		}
-		return SpanExporters.of(
-				new SwitchedSpanExporter(SpanExporter.composite(all), () -> settings.getObject().settings()));
+		var unmasked = SpanExporter.composite(all);
+		return SpanExporters.of(new SwitchedSpanExporter(new MaskingSpanExporter(unmasked, masker), unmasked,
+				() -> settings.getObject().settings()));
 	}
 
 }

@@ -9,7 +9,9 @@ import org.jspecify.annotations.Nullable;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /// `comments` and `history` are in chronological order.
-record TicketDetails(@Schema(requiredMode = REQUIRED) TicketSummary summary,
+///
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketDetails(@Schema(requiredMode = REQUIRED) TicketSummary summary,
 		@Schema(requiredMode = REQUIRED, description = "Rises with every change; sent as the `ETag`") long version,
 		@Schema(requiredMode = REQUIRED) String description,
 		@Schema(requiredMode = REQUIRED, nullable = true) @Nullable String resolution,

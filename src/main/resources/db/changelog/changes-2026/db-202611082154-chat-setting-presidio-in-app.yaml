@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: db-202611082154-chat-setting-presidio-in-app
+      author: retrofit
+      context: schema
+      comment: The switch that lets the app call Presidio itself, for the model's placeholders and the app's spans.
+      changes:
+        - sql:
+            sql: ALTER TABLE chat_setting ADD COLUMN presidio_in_app boolean NOT NULL DEFAULT false;
+      rollback:
+        - sql:
+            sql: ALTER TABLE chat_setting DROP COLUMN presidio_in_app;

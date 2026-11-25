@@ -14,7 +14,7 @@ services:
       interval: 2s
       start_period: 30s
   litellm:
-    # Pinned to an exact version: LiteLLM releases very often (chat ADR 0002).
+    # Pinned to an exact version: LiteLLM releases very often (chat ADR 0002). The evaluations start the same image.
     image: 'ghcr.io/berriai/litellm:v1.108.8'
     command: ['--config', '/app/config.yaml', '--port', '4000']
     volumes:
@@ -89,9 +89,11 @@ services:
       PHOENIX_ENABLE_AUTH: 'false'
     ports:
       - '127.0.0.1:6006:6006'
-  # Presidio finds and masks the personal data LiteLLM's guardrail keeps from the provider (chat ADR 0017). Gunicorn 25
-  # in these images starts its control socket in a thread that may hold stderr's lock when the worker is forked; the
-  # worker then hangs on its first log line, so it is disabled.
+  # Presidio masks the personal data in the chat's traces (chat ADR 0007), and LiteLLM's guardrail asks it for the
+  # pattern data of every request (chat ADR 0017).
+  # The analyzer loads presidio/recognizers.yaml in place of its defaults. The evaluations start the same images with
+  # the same environment. Gunicorn 25 in these images starts its control socket in a thread that may hold stderr's lock
+  # when the worker is forked; the worker then hangs on its first log line, so it is disabled.
   presidio-analyzer:
     image: 'ghcr.io/data-privacy-stack/presidio-analyzer:2.2.365'
     volumes:

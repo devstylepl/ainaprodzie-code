@@ -1,0 +1,42 @@
+# What the app asks Presidio for (chat ADR 0007), in Presidio's own field names. Each section is sent as
+# written: `analyzer` to /analyze with the text added, `anonymizer` to /anonymize with the text and the analyzer's
+# findings added. A new recognizer goes under `ad_hoc_recognizers`; no Java changes.
+analyzer:
+  # The app asks Presidio in English: its default NLP model, the one that finds names, is English.
+  language: en
+  entities:
+    - PERSON
+    - EMAIL_ADDRESS
+    - PHONE_NUMBER
+    - IBAN_CODE
+    - CREDIT_CARD
+    - PL_PESEL
+  # The analyzer finds a PESEL, with its checksum, by Presidio's own recognizer, which presidio/recognizers.yaml loads
+  # for English (chat ADR 0017). LiteLLM's guardrail asks Presidio for these entities but PERSON, with these
+  # recognizers repeated in litellm/presidio-recognizers.json (chat ADR 0017); PersonalDataGuardrailTests holds the two
+  # together.
+  ad_hoc_recognizers:
+    # Presidio's own email recognizer accepts only registered top-level domains, so it misses the addresses of the
+    # demo data, which end in the reserved `.example`. This pattern finds them too.
+    - name: Email address under any top-level domain
+      supported_language: en
+      supported_entity: EMAIL_ADDRESS
+      patterns:
+        - name: email
+          score: 0.9
+          regex: '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+  # A ticket reference, in the format of `TicketReference`, is never personal data. Where a name could stand, as in
+  # "for my colleagues on RET-1047", Presidio takes it for a person, and the span would hold a placeholder instead of
+  # the reference. Taskline, the product the tickets are about, and the systems customers connect to it stand where a
+  # name could just as often. A finding is dropped only when all of it is on the list.
+  allow_list:
+    - '(?i)^RET-\d{1,18}$'
+    - '^Taskline$'
+    - '^Okta$'
+    - '^Jira Cloud$'
+  allow_list_match: regex
+anonymizer:
+  # A trace shows each finding as its type in angle brackets, such as `<EMAIL_ADDRESS>`.
+  anonymizers:
+    DEFAULT:
+      type: replace

@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: db-202611051546-dev-seed-pesel
+      author: retrofit
+      context: dev
+      comment: >-
+        A customer's comment with a PESEL on RET-1045, which the chat masks before the model reads it.
+      changes:
+        - sqlFile:
+            path: ../../seed/demo-data-pesel.sql
+            relativeToChangelogFile: true
+            splitStatements: true
+            stripComments: true
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM ticket_comment WHERE id = '00000000-0000-0000-0000-0000000e0001';
+
+              UPDATE ticket t
+              SET updated_at = greatest(
+                  t.created_at,
+                  (SELECT max(c.created_at) FROM ticket_comment c WHERE c.ticket_id = t.id),
+                  (SELECT max(a.changed_at) FROM ticket_audit_entry a WHERE a.ticket_id = t.id))
+              WHERE t.id = '00000000-0000-0000-0000-0000000d0042';

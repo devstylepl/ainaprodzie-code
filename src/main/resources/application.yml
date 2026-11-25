@@ -19,8 +19,8 @@ spring:
       # Session tables are owned by Liquibase (db-202610071200-spring-session.yaml).
       initialize-schema: never
   ai:
-    # The chat uses only a chat model; the OpenAI starter would otherwise create its embedding, image, audio and
-    # moderation models too.
+    # The chat uses only a chat model; the OpenAI starter would otherwise create its embedding, image, audio,
+    # moderation and decision models too.
     model:
       embedding: none
       image: none
@@ -28,19 +28,31 @@ spring:
         speech: none
         transcription: none
       moderation: none
+      decision: none
     # The OpenAI client talks to the LiteLLM proxy, which maps the alias to a provider model (chat ADR 0002). No
     # defaults for the URL and the key, like the datasource.
     openai:
       base-url: ${LITELLM_URL}
       api-key: ${LITELLM_KEY}
-      # The SDK retries once, and LiteLLM retries each provider call once more: the two layers multiply.
+      # The SDK retries once, and LiteLLM retries each provider call once more: the two layers multiply. LiteLLM's
+      # retry is dropped while the chat's fallback setting is AT_ONCE, its default (chat ADR 0019).
       max-retries: 1
       # Longer than LiteLLM's 15s provider call and its one retry (litellm/config.yaml), so the gateway gives up first
       # and its retry fits into one call of the app. It bounds the SDK's own retry too: after LiteLLM's timeout at about
       # 31s the retry has the few seconds left. A local model that reasons before it answers may need longer.
       timeout: ${CHAT_MODEL_TIMEOUT:35s}
-    # Spring AI can log every prompt and answer. They stay off: no log line holds a question or an answer (chat ADR
-    # 0007).
+    tools:
+      limits:
+        # At most 6 tool calls per question. The next one ends the turn, which the chat answers as failed: a model
+        # that keeps repeating a search spends the quota without getting closer to an answer.
+        max-total-tool-calls: 6
+        on-limit-exceeded: throw
+      observations:
+        # Spring AI's own copy of the tool arguments and results on the span would leave the app unmasked; the chat
+        # adds them under the GenAI names, which MaskingSpanExporter masks (chat ADR 0007).
+        include-content: false
+    # Spring AI can log every prompt and answer, unmasked. They stay off: no log line holds a question, an answer or a
+    # tool result (chat ADR 0007).
     chat:
       observations:
         log-prompt: false
@@ -59,17 +71,26 @@ retrofit:
     # The LiteLLM aliases support staff choose the chat's model from on the settings page; each must be in
     # litellm/config.yaml. Until someone chooses, the chat uses chat-gemini, the default of the stored setting.
     models: chat-gemini,chat-anthropic,chat-chaos
-    # One deadline for a whole question, over every model call it makes; one call, with the SDK's retry, ends within
-    # the client's timeout.
+    # One deadline for a whole question, model and tool calls together. Without it a turn could take about eight
+    # minutes: up to seven model calls, each with the client's timeout and one retry.
     turn-timeout: ${CHAT_TURN_TIMEOUT:70s}
-    # A conversation nobody asks in for this long is forgotten, so what was said in it does not stay in the process
-    # until a restart (chat ADR 0005). Longer than turn-timeout, so a turn still streaming is never forgotten as idle.
+    # A conversation nobody asks in for this long is forgotten, its memory and its placeholders together, so the
+    # personal data behind the placeholders does not stay in the process until a restart (chat ADR 0005). Longer than
+    # turn-timeout, so a turn still streaming is never forgotten as idle.
     conversation-idle-timeout: ${CHAT_CONVERSATION_IDLE_TIMEOUT:30m}
+    # Presidio masks the chat's texts in its traces before they leave the app (chat ADR 0007). No defaults, like the
+    # datasource.
+    presidio:
+      analyzer-url: ${PRESIDIO_ANALYZER_URL}
+      anonymizer-url: ${PRESIDIO_ANONYMIZER_URL}
 
 server:
   shutdown: graceful
   # A TLS-terminating proxy sits in front of the app; honour X-Forwarded-* headers.
-  forward-headers-strategy: framework
+  request:
+    header:
+      forwarded:
+        strategy: framework
 
 management:
   endpoint:
@@ -113,10 +134,11 @@ springdoc:
 
 logging:
   level:
-    # It logs a failed model call with its message, which can quote the user's words in LiteLLM's echo of the request.
-    # The chat logs the same failures itself without any message (RedactedFailure), so no log line holds a question
-    # or an answer (chat ADR 0007).
+    # Both log a failed model call or tool call with its message, which can quote the user's words: the model's
+    # arguments, or LiteLLM's echo of the request. The chat logs the same failures itself without any message
+    # (RedactedFailure), so no log line holds a question, an answer or a tool result (chat ADR 0007).
     org.springframework.ai.chat.model.MessageAggregator: "off"
+    org.springframework.ai.tool.method.MethodToolCallback: "off"
 
 ---
 spring:
@@ -137,6 +159,13 @@ spring:
       # provider key and not LiteLLM's master key.
       base-url: ${LITELLM_URL:http://localhost:4000}
       api-key: ${LITELLM_KEY:sk-retrofit-app-key}
+
+retrofit:
+  chat:
+    # Presidio from compose.yaml.
+    presidio:
+      analyzer-url: ${PRESIDIO_ANALYZER_URL:http://localhost:5002}
+      anonymizer-url: ${PRESIDIO_ANONYMIZER_URL:http://localhost:5001}
 
 management:
   opentelemetry:
@@ -175,6 +204,10 @@ retrofit:
   chat:
     # Short, so the suite that waits for it stays fast; a scripted turn takes milliseconds.
     turn-timeout: 3s
+    # Never called: the chat's test configuration replaces Presidio with a stub masker.
+    presidio:
+      analyzer-url: ${PRESIDIO_ANALYZER_URL:http://localhost:5002}
+      anonymizer-url: ${PRESIDIO_ANONYMIZER_URL:http://localhost:5001}
 
 management:
   tracing:

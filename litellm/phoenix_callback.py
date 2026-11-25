@@ -5,13 +5,14 @@ In the proxy, LiteLLM 1.108.8 wraps every model call in a parent span, litellm_p
 attribute of the call's own span, the model and the tokens included. Phoenix prices both, so a trace and the project
 would show twice the cost. The parent span here keeps its place in the tree but only marks itself as a chain, and the
 cost stays on the call's span. config.yaml names this handler instead of arize_phoenix; once LiteLLM stops copying the
-attributes (https://github.com/BerriAI/litellm/issues/50649), the callback goes back to arize_phoenix and this file
-goes away.
+attributes (https://github.com/BerriAI/litellm/issues/50649), the pricing part goes away and the user and the session
+below stay.
 
-LiteLLM puts the request's user, the app's caller, on session.id as well as user.id. Here session.id is the
-conversation the app sends as conversation_id, so Phoenix groups a conversation's calls as one session. Both spans carry
-the user and the session, because Phoenix reads them from a trace's root, which is litellm_proxy_request when the app
-sends no traceparent.
+The request's user is the app's caller and LiteLLM's end user. config.yaml drops it before the provider, which takes it
+out of the call's model parameters, where LiteLLM reads the user.id of a span from: user.id is the end user instead.
+LiteLLM puts the end user on session.id, and here session.id is the conversation the app sends as conversation_id, so
+Phoenix groups a conversation's calls as one session. Both spans carry the user and the session, because Phoenix reads
+them from a trace's root, which is litellm_proxy_request when the app sends no traceparent.
 """
 
 from litellm.integrations._types.open_inference import OpenInferenceSpanKindValues, SpanAttributes
@@ -31,11 +32,11 @@ class PricedOnceArizePhoenixLogger(ArizePhoenixLogger):
 
 
 def _set_user_and_session(span, kwargs):
-    payload = kwargs.get("standard_logging_object") or {}
-    user = (payload.get("model_parameters") or {}).get("user")
+    metadata = (kwargs.get("standard_logging_object") or {}).get("metadata") or {}
+    user = metadata.get("user_api_key_end_user_id")
     if user:
         span.set_attribute(SpanAttributes.USER_ID, str(user))
-    conversation = ((payload.get("metadata") or {}).get("requester_metadata") or {}).get("conversation_id")
+    conversation = (metadata.get("requester_metadata") or {}).get("conversation_id")
     if conversation:
         span.set_attribute(SpanAttributes.SESSION_ID, str(conversation))
 

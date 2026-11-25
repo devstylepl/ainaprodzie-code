@@ -19,7 +19,7 @@ import app.retrofit.auth.Role;
 import app.retrofit.chat.ChatServerContext.Reply;
 
 /// A request LiteLLM refuses with 400. The guardrail's refusal of a card number (chat ADR 0017) ends the question with
-/// `personal-data-blocked`, any other refusal with `failed`. The real OpenAI client reads the refusals from
+/// `guardrails-blocked`, any other refusal with `failed`. The real OpenAI client reads the refusals from
 /// [StubModelServer], because the code is chosen by the message LiteLLM writes into its error.
 @TestPropertySource(properties = "spring.ai.model.chat=openai")
 @Import(StubModelServer.Wiring.class)
@@ -33,7 +33,7 @@ class ChatRefusedRequestTests extends RandomPortContext {
 
 	/// LiteLLM v1.108.3's answer to a request holding a card number, word for word.
 	@Test
-	void aRequestTheGuardrailBlocksEndsTheQuestionWithPersonalDataBlocked() {
+	void aRequestTheGuardrailBlocksEndsTheQuestionWithGuardrailsBlocked() {
 		modelServer.refuse(400, """
 				{"error": {"message": "Blocked entity detected: CREDIT_CARD by Guardrail: personal-data. This entity \
 				is not allowed to be used in this request.", "type": "invalid_request_error", "param": null, \
@@ -42,7 +42,7 @@ class ChatRefusedRequestTests extends RandomPortContext {
 		var reply = ask("Card 4111 1111 1111 1111");
 
 		assertThat(reply.names()).containsExactly("error");
-		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("personal-data-blocked");
+		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("guardrails-blocked");
 	}
 
 	@Test

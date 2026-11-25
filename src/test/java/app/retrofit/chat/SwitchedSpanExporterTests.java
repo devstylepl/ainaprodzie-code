@@ -16,23 +16,49 @@ import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 
-/// The settings decide at export time whether a batch of the app's spans leaves, and settings it cannot read count as
-/// off.
+/// The settings decide at export time whether a batch of the app's spans leaves, and whether masked, and settings it
+/// cannot read count as off.
 class SwitchedSpanExporterTests {
 
 	private final InMemorySpanExporter exported = InMemorySpanExporter.create();
 
 	@Test
-	void withTheSwitchOnTheBatchLeaves() {
-		var result = new SwitchedSpanExporter(exported, () -> new ChatSettings(true, false, true, "chat-gemini")).export(spans(2));
+	void withPresidioInTheAppTheBatchLeavesMasked() {
+		var masked = new MaskingSpanExporter(exported, text -> "masked");
+
+		var result = new SwitchedSpanExporter(masked, exported,
+				() -> new ChatSettings(true, false, true, true, "chat-gemini", Fallback.AT_ONCE, ReasoningEffort.OFF))
+				.export(spans(2));
 
 		assertThat(result.isSuccess()).isTrue();
-		assertThat(exported.getFinishedSpanItems()).hasSize(2);
+		assertThat(exported.getFinishedSpanItems()).hasSize(2).allSatisfy(span -> assertThat(
+				span.getAttributes().asMap().values()).doesNotContain("Mail jan@acme.example"));
 	}
 
 	@Test
-	void withTheSwitchOffTheBatchIsDroppedAsASuccess() {
-		var result = new SwitchedSpanExporter(exported, () -> new ChatSettings(false, true, true, "chat-gemini")).export(spans(2));
+	void withoutPresidioInTheAppTheBatchLeavesAsItIsWithoutCallingTheMasker() {
+		var masked = new MaskingSpanExporter(exported, text -> {
+			throw new AssertionError("The masker was called for " + text);
+		});
+
+		var result = new SwitchedSpanExporter(masked, exported,
+				() -> new ChatSettings(true, false, true, false, "chat-gemini", Fallback.AT_ONCE, ReasoningEffort.OFF))
+				.export(spans(2));
+
+		assertThat(result.isSuccess()).isTrue();
+		assertThat(exported.getFinishedSpanItems()).hasSize(2).allSatisfy(span -> assertThat(
+				span.getAttributes().asMap().values()).contains("Mail jan@acme.example"));
+	}
+
+	@Test
+	void withTheSwitchOffTheBatchIsDroppedAsASuccessWithoutCallingTheDelegate() {
+		var delegate = new MaskingSpanExporter(exported, text -> {
+			throw new AssertionError("The masker was called for " + text);
+		});
+
+		var result = new SwitchedSpanExporter(delegate, exported,
+				() -> new ChatSettings(false, false, true, true, "chat-gemini", Fallback.AT_ONCE, ReasoningEffort.OFF))
+				.export(spans(2));
 
 		assertThat(result.isSuccess()).isTrue();
 		assertThat(exported.getFinishedSpanItems()).isEmpty();
@@ -44,7 +70,7 @@ class SwitchedSpanExporterTests {
 			throw new IllegalStateException("The database is down");
 		};
 
-		var result = new SwitchedSpanExporter(exported, failing).export(spans(2));
+		var result = new SwitchedSpanExporter(exported, exported, failing).export(spans(2));
 
 		assertThat(result.isSuccess()).isTrue();
 		assertThat(exported.getFinishedSpanItems()).isEmpty();
@@ -71,7 +97,8 @@ class SwitchedSpanExporterTests {
 				return CompletableResultCode.ofSuccess();
 			}
 		};
-		var gate = new SwitchedSpanExporter(delegate, () -> new ChatSettings(false, false, true, "chat-gemini"));
+		var gate = new SwitchedSpanExporter(delegate, delegate,
+				() -> new ChatSettings(false, false, true, false, "chat-gemini", Fallback.AT_ONCE, ReasoningEffort.OFF));
 
 		gate.flush();
 		gate.shutdown();

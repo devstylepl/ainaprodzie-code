@@ -41,18 +41,19 @@ A complete, deliberately realistic support desk built to have AI retrofitted int
 - **Open:** light theme only today (`colorScheme: 'light'`), but dark mode is not ruled out.
 - **Out of scope:** sprints, epics, email integration, payments, CRM and monitoring integrations, a configurable workflow engine.
 
-### Chat (lesson 0)
+### Read-only chat (lesson 1)
 
 Decisions: `docs/adr/chat/`.
 
-- **Who:** both roles. When chat design decisions conflict, support staff's work wins.
-- **What:** a general assistant of the help desk. It greets, answers small talk briefly and explains how the help desk works: customers raise tickets, support staff answer them, and a ticket moves through its statuses. It knows who is signed in, the current time and the language of the interface, and nothing else from the app: it cannot read or change tickets. Asked about a particular ticket, it says it cannot see tickets yet and points to the ticket list. Reading tickets arrives in lesson 1, operations in lesson 2.
-- **Where:** a non-modal panel docked on the right of the signed-in shell, opened from the header, kept open across navigation. On a narrow screen the panel takes the full width and closes to show the page behind it.
-- **Streaming:** the answer streams in as the model writes it.
+- **Who:** both roles. The chat reads tickets as the signed-in user, through the same visibility as the rest of the app, so a customer gets only their organization's tickets and never internal notes. When chat design decisions conflict, support staff's queue work wins: "which Acme tickets wait for the customer?", then reading an answer next to the ticket it opened.
+- **What:** answers about the tickets the user may see: status, priority, assignment, public comments, waiting time, response deadline and SLA breaches. It only reads. Asked to change a ticket, it says so and points to the ticket's page; operations arrive in lesson 2.
+- **Where:** a non-modal panel docked on the right of the signed-in shell, opened from the header, kept open across navigation. A ticket reference in an answer is a link that opens the ticket in the main area. On a narrow screen the panel takes the full width and closes when a link is followed. On a ticket's page the chat knows that ticket: "this ticket" means it, the suggested questions are about it, and the reader can remove it for questions about the whole desk.
+- **Tool calls are visible (product commitment):** the answer streams in after live entries for each tool the model calls, with the arguments it chose, so the user sees where the answer's facts come from. Later lessons keep this transparency rather than hiding it.
 - **Memory:** a conversation remembers its last 20 messages for follow-ups. "New conversation" and a page reload start fresh; there is no history to return to.
 - **Language:** it answers in the language of the question, otherwise in the language of the interface.
 - **Optional:** the app builds and runs without the chat; a model that does not answer must leave the ticket desk usable.
-- **Privacy:** the chat masks no personal data. What a user types reaches the model provider as written, and LiteLLM's traces and logs carry the prompts and answers as the provider receives them. The app's own traces leave only while support staff allow them on the Settings page.
+- **Privacy:** support staff decide on the Settings page how much the app protects. With "Mask personal data in the app" on, the model reads personal data as placeholders and the app's traces leave masked; off, as on a fresh database, only LiteLLM's guardrail masks pattern data, such as e-mail addresses, before the provider, never names. The app's traces leave only while support staff allow them, and LiteLLM's traces and logs carry the prompts and answers as the provider receives them.
+- **Ticket text is data:** titles, descriptions and comments are written by customers, and the seed includes prompt-injection attempts the chat must report, not follow.
 
 ## Brand Commitments
 

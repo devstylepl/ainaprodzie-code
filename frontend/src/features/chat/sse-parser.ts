@@ -8,6 +8,11 @@ type Fields = Record<string, unknown>
 // Exhaustive over the contract's union: an event type the contract gains fails
 // to compile here. Each check is the least the panel relies on.
 const IS_EVENT: Record<ChatEventType, (data: Fields) => boolean> = {
+  reasoning: (data) => typeof data.text === 'string',
+  toolStarted: (data) => typeof data.tool === 'string' && typeof data.toolCall === 'number',
+  tool: (data) =>
+    typeof data.tool === 'string' && typeof data.arguments === 'object' && data.arguments !== null,
+  tickets: (data) => typeof data.toolCall === 'number' && Array.isArray(data.tickets),
   token: (data) => typeof data.text === 'string',
   done: () => true,
   error: (data) => typeof data.code === 'string',

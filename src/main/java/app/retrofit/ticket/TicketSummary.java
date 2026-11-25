@@ -8,7 +8,8 @@ import org.jspecify.annotations.Nullable;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-record TicketSummary(@Schema(requiredMode = REQUIRED, example = "RET-1042") String reference,
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketSummary(@Schema(requiredMode = REQUIRED, example = "RET-1042") String reference,
 		@Schema(requiredMode = REQUIRED) String title,
 		@Schema(requiredMode = REQUIRED) NamedRef organization,
 		@Schema(requiredMode = REQUIRED) NamedRef author,

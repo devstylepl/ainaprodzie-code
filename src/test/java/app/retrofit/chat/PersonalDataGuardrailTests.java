@@ -1,37 +1,73 @@
 package app.retrofit.chat;
 
+import static app.retrofit.chat.LiteLlmConfig.alias;
+import static app.retrofit.chat.LiteLlmConfig.appModels;
+import static app.retrofit.chat.LiteLlmConfig.parameterList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
 import org.yaml.snakeyaml.Yaml;
 
-/// LiteLLM's Presidio guardrail masks personal data before a request reaches the provider (chat ADR 0017). An alias
-/// without it sends a question's personal data as it is, and an analyzer without the PESEL recognizer for English finds
-/// no PESEL.
+import tools.jackson.databind.json.JsonMapper;
+
+/// LiteLLM's Presidio guardrail is the only layer for e-mail addresses, phone numbers, IBANs and PESELs (chat ADR
+/// 0017): it masks them before a request reaches the provider. An alias without it sends them as they are, a guardrail
+/// that looks for other data than the app's recognizers find finds what the app was never told to find, and an
+/// analyzer without the PESEL recognizer for English finds no PESEL. The same aliases keep the caller's id from the
+/// provider (chat ADR 0015).
 class PersonalDataGuardrailTests {
 
 	/// The guardrail of `litellm/config.yaml`.
-	private static final String GUARDRAIL = "personal-data";
+	static final String GUARDRAIL = "personal-data";
 
-	private static final String APP_GROUP = "app";
+	/// What an alias of the app drops before the provider (chat ADR 0015).
+	private static final String USER = "user";
+
+	/// Presidio takes words for people that are no name, and the guardrail cannot be given the app's allow-list.
+	private static final String PERSON = "PERSON";
 
 	@Test
-	void everyAliasTheAppCallsHasTheGuardrail() throws IOException {
-		assertThat(models()).filteredOn(model -> groups(model).contains(APP_GROUP))
-			.isNotEmpty()
-			.allSatisfy(model -> assertThat(guardrails(model)).as(alias(model)).contains(GUARDRAIL));
+	void everyAliasTheAppCallsHasTheGuardrail() {
+		assertThat(appModels()).isNotEmpty()
+			.allSatisfy(model -> assertThat(parameterList(model, "guardrails")).as(alias(model)).contains(GUARDRAIL));
+	}
+
+	/// LiteLLM would pass the request's `user`, the caller's id, to Anthropic as `metadata.user_id`.
+	@Test
+	void everyAliasTheAppCallsDropsTheUserBeforeTheProvider() {
+		assertThat(appModels()).isNotEmpty()
+			.allSatisfy(model -> assertThat(parameterList(model, "additional_drop_params")).as(alias(model))
+				.contains(USER));
 	}
 
 	@Test
-	void theGuardrailMasksPatternDataButPeopleAndBlocksCardNumbers() throws IOException {
-		assertThat(guardrailParameters().get("pii_entities_config")).isEqualTo(Map.of("EMAIL_ADDRESS", "MASK",
-				"PHONE_NUMBER", "MASK", "IBAN_CODE", "MASK", "CREDIT_CARD", "BLOCK", "PL_PESEL", "MASK"));
+	@SuppressWarnings("unchecked")
+	void theGuardrailMasksWhatTheAppFindsButPeopleAndBlocksCardNumbers() throws IOException {
+		var entities = new ArrayList<>((List<String>) analyzer().get("entities"));
+		entities.remove(PERSON);
+		var config = (Map<String, String>) guardrailParameters().get("pii_entities_config");
+
+		assertThat(config.keySet()).containsExactlyInAnyOrderElementsOf(entities);
+		assertThat(config).allSatisfy((entity, action) -> assertThat(action).as(entity)
+			.isEqualTo(entity.equals("CREDIT_CARD") ? "BLOCK" : "MASK"));
+	}
+
+	@Test
+	void theGuardrailHasTheAppsRecognizers() throws IOException {
+		var file = Path.of("litellm", Path.of((String) guardrailParameters().get("presidio_ad_hoc_recognizers"))
+			.getFileName()
+			.toString());
+
+		assertThat(JsonMapper.builder().build().readValue(Files.readString(file), List.class))
+			.isEqualTo(analyzer().get("ad_hoc_recognizers"));
 	}
 
 	@Test
@@ -63,18 +99,9 @@ class PersonalDataGuardrailTests {
 			.contains("./litellm/personal_data_guardrail.py:/app/personal_data_guardrail.py:ro");
 	}
 
-	private static Map<String, Object> config() throws IOException {
-		return new Yaml().load(Files.readString(Path.of("litellm", "config.yaml")));
-	}
-
-	@SuppressWarnings("unchecked")
-	private static List<Map<String, Object>> models() throws IOException {
-		return (List<Map<String, Object>>) config().get("model_list");
-	}
-
 	@SuppressWarnings("unchecked")
 	private static Map<String, Object> guardrailParameters() throws IOException {
-		var guardrails = (List<Map<String, Object>>) config().getOrDefault("guardrails", List.of());
+		var guardrails = (List<Map<String, Object>>) LiteLlmConfig.read().getOrDefault("guardrails", List.of());
 		return guardrails.stream()
 			.filter(guardrail -> GUARDRAIL.equals(guardrail.get("guardrail_name")))
 			.map(guardrail -> (Map<String, Object>) guardrail.get("litellm_params"))
@@ -82,20 +109,8 @@ class PersonalDataGuardrailTests {
 			.orElseThrow(() -> new AssertionError("litellm/config.yaml has no guardrail " + GUARDRAIL));
 	}
 
-	private static String alias(Map<String, Object> model) {
-		return (String) model.get("model_name");
-	}
-
-	@SuppressWarnings("unchecked")
-	private static List<String> groups(Map<String, Object> model) {
-		var info = (Map<String, Object>) model.getOrDefault("model_info", Map.of());
-		return (List<String>) info.getOrDefault("access_groups", List.of());
-	}
-
-	@SuppressWarnings("unchecked")
-	private static List<String> guardrails(Map<String, Object> model) {
-		var parameters = (Map<String, Object>) model.getOrDefault("litellm_params", Map.of());
-		return (List<String>) parameters.getOrDefault("guardrails", List.of());
+	private static Map<String, Object> analyzer() {
+		return PresidioRequests.read(new ClassPathResource("presidio/requests.yaml")).analyzer();
 	}
 
 }

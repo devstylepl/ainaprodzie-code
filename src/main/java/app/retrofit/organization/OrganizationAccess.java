@@ -9,7 +9,8 @@ import org.springframework.stereotype.Service;
 /// Support sees every organization; a customer sees only their own, and never queries another one's id.
 ///
 /// Public because the chat resolves organization and team names through [#visibleTo(Caller)] and
-/// [#teamsVisibleTo(Caller)] from outside this package, for the caller its question looked up.
+/// [#teamsVisibleTo(Caller)], and the names of the people through [#displayNamesVisibleTo(Caller)], from outside this
+/// package, for the caller its question looked up.
 @Service
 public class OrganizationAccess {
 
@@ -34,6 +35,17 @@ public class OrganizationAccess {
 		return switch (caller) {
 			case Caller.Support(var id) -> teams.findAllWithMembership(id);
 			case Caller.Customer _ -> List.of();
+		};
+	}
+
+	/// The display names of the people the caller may see, each once, in alphabetical order: a customer sees the
+	/// customers of their organization and all support staff, support staff see everyone. Disabled accounts are
+	/// included, because old tickets name them.
+	public List<String> displayNamesVisibleTo(Caller caller) {
+		return switch (caller) {
+			case Caller.Support _ -> organizations.findAllDisplayNames();
+			case Caller.Customer(var _, var organizationId) ->
+				organizations.findDisplayNamesOfOrganizationAndSupport(organizationId);
 		};
 	}
 

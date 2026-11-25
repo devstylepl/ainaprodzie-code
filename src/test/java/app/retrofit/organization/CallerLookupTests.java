@@ -25,9 +25,6 @@ class CallerLookupTests extends RandomPortContext {
 	private static final String PROBLEMS = "https://retrofit.app/problems/";
 
 	@Autowired
-	CallerLookup callers;
-
-	@Autowired
 	PasswordEncoder passwordEncoder;
 
 	TestUsers users;

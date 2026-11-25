@@ -7,7 +7,8 @@ import java.util.UUID;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-record TicketComment(@Schema(requiredMode = REQUIRED) UUID id,
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketComment(@Schema(requiredMode = REQUIRED) UUID id,
 		@Schema(requiredMode = REQUIRED) NamedRef author,
 		@Schema(requiredMode = REQUIRED) boolean fromSupport,
 		@Schema(requiredMode = REQUIRED) boolean internal,

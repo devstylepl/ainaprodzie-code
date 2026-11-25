@@ -11,9 +11,10 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.transaction.annotation.Transactional;
 
-/// The dev seed (`db/seed/demo-data.sql`, then its CREATED backfill `db/seed/demo-data-created-audit.sql` and its
-/// LINK audit alignment `db/seed/demo-data-link-audit.sql`) applied to the current schema inside a rolled-back transaction, so a schema change that the hand-written demo data no
-/// longer satisfies fails here instead of on the next `dev` start.
+/// The dev seed (`db/seed/demo-data.sql`, then its CREATED backfill `db/seed/demo-data-created-audit.sql`, its LINK
+/// audit alignment `db/seed/demo-data-link-audit.sql` and its PESEL comment `db/seed/demo-data-pesel.sql`) applied to
+/// the current schema inside a rolled-back transaction, so a schema change that the hand-written demo data no longer
+/// satisfies fails here instead of on the next `dev` start.
 @Transactional
 class DemoDataTests extends RandomPortContext {
 
@@ -28,7 +29,8 @@ class DemoDataTests extends RandomPortContext {
 	void applySeed() {
 		new ResourceDatabasePopulator(new ClassPathResource("db/seed/demo-data.sql"),
 				new ClassPathResource("db/seed/demo-data-created-audit.sql"),
-				new ClassPathResource("db/seed/demo-data-link-audit.sql")).execute(dataSource);
+				new ClassPathResource("db/seed/demo-data-link-audit.sql"),
+				new ClassPathResource("db/seed/demo-data-pesel.sql")).execute(dataSource);
 	}
 
 	@Test

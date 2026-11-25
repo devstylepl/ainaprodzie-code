@@ -36,6 +36,24 @@ class JdbcOrganizationRepository {
 				.optional();
 	}
 
+	List<String> findAllDisplayNames() {
+		return jdbc.sql("SELECT DISTINCT display_name FROM app_user ORDER BY display_name")
+				.query(String.class)
+				.list();
+	}
+
+	List<String> findDisplayNamesOfOrganizationAndSupport(UUID organizationId) {
+		return jdbc.sql("""
+				SELECT DISTINCT display_name
+				FROM app_user
+				WHERE organization_id = :organizationId OR 'SUPPORT' = ANY (roles)
+				ORDER BY display_name
+				""")
+				.param("organizationId", organizationId)
+				.query(String.class)
+				.list();
+	}
+
 	private static Organization mapRow(ResultSet rs, int rowNum) throws SQLException {
 		return new Organization(rs.getObject("id", UUID.class), rs.getString("name"),
 				rs.getInt("first_response_sla_minutes"));

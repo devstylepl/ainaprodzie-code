@@ -3,14 +3,41 @@
   "title": "Chat",
   "close": "Close the chat",
   "newConversation": "New conversation",
-  "noTicketAccess": "The chat cannot see your tickets.",
+  "readOnly": "The chat only reads tickets.",
   "empty": {
-    "title": "Ask the chat",
-    "hint": "Ask in plain language, then follow up on its answers. It answers from general knowledge, not from the tickets."
+    "title": "Ask about your tickets",
+    "hint": "Ask in plain language about the tickets you can see: their status, SLA and waiting time."
   },
+  "prompts": {
+    "USER": {
+      "waiting": "Which of our tickets wait for our answer?",
+      "oldest": "How long has our oldest open ticket been waiting?",
+      "resolved": "Which of our tickets are resolved but not closed?"
+    },
+    "SUPPORT": {
+      "breached": "Which new tickets have breached the SLA?",
+      "assigned": "What is assigned to me?",
+      "organization": "Which Acme Corp tickets wait for the customer?"
+    }
+  },
+  "ticketPrompts": {
+    "USER": {
+      "status": "Where does this ticket stand?"
+    },
+    "SUPPORT": {
+      "summary": "Summarise this ticket",
+      "waiting": "What is the customer waiting for?"
+    }
+  },
+  "ticketContext": {
+    "label": "Asking about {{reference}}",
+    "dismiss": "Stop asking about {{reference}}"
+  },
+  "askedOn": "on {{reference}}",
   "composer": {
     "label": "Your question",
-    "placeholder": "Ask a question",
+    "placeholder": "Ask about tickets",
+    "ticketPlaceholder": "Ask about {{reference}}",
     "send": "Send",
     "stop": "Stop"
   },
@@ -19,31 +46,101 @@
     "chat": "Chat"
   },
   "pending": "Preparing the answer…",
+  "reasoning": {
+    "thinking": "Thinking",
+    "thought": "Thought for {{seconds}} s",
+    "show": "Show reasoning"
+  },
+  "showInList": "Show these in the list",
   "stopped": "Stopped before the answer was complete.",
+  "answerTickets": {
+    "label": "Tickets in this answer",
+    "showAll": "Show all {{count}}",
+    "showFewer": "Show fewer"
+  },
   "errors": {
     "rate-limited": "Too many questions at once. Wait a moment and try again.",
     "unavailable": "The chat is not available right now. Try again later.",
     "timeout": "The answer took too long.",
-    "personal-data-blocked": "The chat did not send this question: the conversation holds personal data that must not reach the model, such as a card number. Remove it from the question and ask again, or start a new conversation if an earlier answer holds it.",
+    "guardrails-blocked": "The chat did not send this question: the conversation holds personal data that must not reach the model, such as a card number. Remove it from the question and ask again, or start a new conversation if an earlier answer holds it.",
     "failed": "The chat could not answer this question.",
     "request": "The question could not be sent."
+  },
+  "tools": {
+    "searchTickets": "Searching tickets",
+    "getTicket": "Reading ticket {{reference}}",
+    "getTicketUnnamed": "Reading a ticket",
+    "unknown": "Using the tool {{tool}}"
+  },
+  "criteria": {
+    "text": "text “{{value}}”",
+    "statuses": "status {{value}}",
+    "categories": "category {{value}}",
+    "priorities": "priority {{value}}",
+    "slaBreached": "SLA breached",
+    "withinSla": "within SLA",
+    "assignedToMe": "assigned to me",
+    "raisedByMe": "raised by me",
+    "organization": "organization {{value}}",
+    "team": "team {{value}}",
+    "longestWaiting": "longest waiting first",
+    "createdFrom": "created from {{value}}",
+    "createdTo": "created before {{value}}",
+    "deadlineBefore": "response deadline before {{value}}"
   },
   "settings": {
     "link": "Settings",
     "title": "Settings",
-    "subtitle": "How the chat picks its model and how its traces reach Phoenix.",
+    "subtitle": "Which model the chat uses, what it does when the provider fails, whether the model reasons before it answers, who can read personal data from it, and how its traces reach Phoenix.",
     "model": {
       "title": "Model",
       "sentence": "Every chat question goes to this LiteLLM alias; litellm/config.yaml maps it to a provider model.",
       "chosen": "Chat questions now go to {{model}}.",
       "notLoaded": "The models could not be loaded."
     },
+    "fallback": {
+      "title": "Fallback model",
+      "options": {
+        "off": "Off",
+        "afterRetry": "After a retry",
+        "atOnce": "At once"
+      },
+      "sentences": {
+        "off": "Off: when the model's provider fails or is too slow, the question is retried, and if that fails too the answer ends with the error.",
+        "afterRetry": "After a retry: when the model's provider fails or is too slow, LiteLLM retries it once, then sends the question to the fallback model that litellm/config.yaml names for the alias, if any.",
+        "atOnce": "At once: when the model's provider fails or is too slow, LiteLLM sends the question to the fallback model that litellm/config.yaml names for the alias, if any, without a retry."
+      },
+      "states": {
+        "off": "off",
+        "afterRetry": "set to after a retry",
+        "atOnce": "set to at once"
+      }
+    },
+    "reasoning": {
+      "title": "Reasoning",
+      "options": {
+        "off": "Off",
+        "medium": "Medium",
+        "high": "High"
+      },
+      "sentences": {
+        "off": "Off: the chat does not ask the model to reason before it answers.",
+        "medium": "Medium: the chat asks the model to reason before it answers, with medium effort.",
+        "high": "High: the chat asks the model to reason before it answers, with high effort. The answer takes longer and costs more tokens."
+      },
+      "states": {
+        "off": "off",
+        "medium": "set to medium",
+        "high": "set to high"
+      }
+    },
     "traces": {
       "title": "App traces to Phoenix",
       "on": "On",
       "off": "Off",
-      "onSentence": "On: the app also sends its own spans, and each question shows as one trace with the app's spans and LiteLLM's model calls.",
-      "offSentence": "Off: only LiteLLM sends traces, one per model call, with the provider model and its cost but without the app's spans."
+      "onMaskedSentence": "On: the app also sends its own spans, masked by Presidio, and each question shows as one trace with its tool steps and LiteLLM's model calls.",
+      "onUnmaskedSentence": "On: the app also sends its own spans, unmasked while \"Mask personal data in the app\" is off, and each question shows as one trace with its tool steps and LiteLLM's model calls.",
+      "offSentence": "Off: only LiteLLM sends traces, one per model call, with the provider model and its cost but without the tool steps between calls."
     },
     "join": {
       "title": "Group LiteLLM calls per chat message",
@@ -57,7 +154,14 @@
       "offSentence": "Off: the app's span of a model call is a plain step, so each call's tokens and cost are counted once, on LiteLLM's span.",
       "lockedSentence": "The app sends no spans while app traces are off, so this applies only while they are on."
     },
+    "presidio": {
+      "title": "Mask personal data in the app",
+      "mechanism": "Presidio",
+      "onSentence": "On: the app replaces the people it knows with placeholders such as <PERSON_1> before the model reads them, and masks its own spans before they leave. E-mail addresses, phone numbers, IBANs and PESELs are LiteLLM's guardrail's, on or off.",
+      "offSentence": "Off: names and other personal data reach the model provider as written, and Phoenix shows them in LiteLLM's traces. Only LiteLLM's guardrail masks e-mail addresses, phone numbers, IBANs and PESELs and refuses a card number, and the app's own spans leave unmasked too while app traces are on."
+    },
     "groups": {
+      "personalData": "Personal data",
       "tracing": "Tracing in Phoenix"
     },
     "flow": {
@@ -76,29 +180,40 @@
       "forms": {
         "sent": "Sent",
         "notSent": "Not sent",
+        "placeholders": "Placeholders",
+        "masked": "Masked",
         "asWritten": "As written",
         "namesAsWritten": "Names as written"
       },
       "hops": {
+        "appToPresidio": {
+          "sent": "The texts of the app's spans, while app traces are on, to mask the personal data in them. Questions and tool results are not sent.",
+          "notSent": "The app asks Presidio nothing."
+        },
         "appToLitellm": {
-          "asWritten": "Questions as the users wrote them, names and other personal data included."
+          "placeholders": "The people the app knows as placeholders such as <PERSON_1>, everything else as the customers wrote it.",
+          "asWritten": "Names and other personal data included, as the customers wrote them."
         },
         "appToPhoenix": {
           "notSent": "The app sends no spans.",
+          "masked": "The app's spans, with personal data replaced by its type, such as <PERSON>.",
           "asWritten": "The app's spans, personal data included."
         },
         "litellmToPresidio": {
           "sent": "Every request, before it goes to the provider: LiteLLM's guardrail."
         },
         "litellmToProvider": {
-          "namesAsWritten": "Names as written. The guardrail masks e-mail addresses, phone numbers, IBANs and PESELs, and a card number refuses the request."
+          "placeholders": "The people as placeholders. The guardrail masks e-mail addresses, phone numbers, IBANs and PESELs, and a card number refuses the request.",
+          "placeholdersOrFallback": "The people as placeholders. The guardrail masks e-mail addresses, phone numbers, IBANs and PESELs, and a card number refuses the request. When the model's provider fails, the same request goes to the fallback model's provider.",
+          "namesAsWritten": "Names as written. The guardrail masks e-mail addresses, phone numbers, IBANs and PESELs, and a card number refuses the request.",
+          "namesAsWrittenOrFallback": "Names as written. The guardrail masks e-mail addresses, phone numbers, IBANs and PESELs, and a card number refuses the request. When the model's provider fails, the same request goes to the fallback model's provider."
         },
         "litellmToPhoenix": {
           "sent": "Each model call, as the provider received it."
         }
       },
       "shapes": {
-        "perQuestionWithSteps": "One trace per question: the app's spans with LiteLLM's model calls.",
+        "perQuestionWithSteps": "One trace per question: the app's tool steps with LiteLLM's model calls.",
         "perQuestionModelCalls": "One trace per question, holding LiteLLM's model calls only.",
         "perModelCall": "One trace per model call, from LiteLLM only."
       }

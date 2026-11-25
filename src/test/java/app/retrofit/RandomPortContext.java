@@ -13,7 +13,10 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.web.client.RestClient;
+
+import app.retrofit.organization.CallerLookup;
 
 /// One real server and one database for every server suite. Suites extend this class instead of declaring their own
 /// annotations, so the Spring test context cache shares a single context across them.
@@ -24,6 +27,11 @@ public abstract class RandomPortContext {
 
 	@Autowired
 	protected JdbcClient jdbc;
+
+	/// Counts how often an operation looks the signed-in user up. The spies of every suite live here, so the suites
+	/// still share one context; each is reset after every test.
+	@MockitoSpyBean
+	protected CallerLookup callers;
 
 	@LocalServerPort
 	protected int port;

@@ -7,11 +7,13 @@ import app.retrofit.platform.FieldError;
 import app.retrofit.platform.Validations;
 
 /// A page and size out of range is a validation problem (422) for every caller, the API's included.
-record TicketPageRequest(TicketSort sort, int page, int size) {
+///
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketPageRequest(TicketSort sort, int page, int size) {
 
 	static final int MAX_SIZE = 100;
 
-	TicketPageRequest {
+	public TicketPageRequest {
 		var errors = new ArrayList<FieldError>();
 		validate(errors, page, size);
 		Validations.throwIfInvalid(errors);

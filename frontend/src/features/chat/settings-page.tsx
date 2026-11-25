@@ -27,23 +27,47 @@ type Switch = {
   [K in Setting]: ChatSettings[K] extends boolean ? K : never
 }[Setting]
 
+/** The settings stored as one of a few named choices. */
+type Choice = 'fallback' | 'reasoning'
+
 /** Each panel's bundle prefix under `settings`. */
 const SETTING_KEYS: Record<Setting, string> = {
   model: 'settings.model',
+  fallback: 'settings.fallback',
+  reasoning: 'settings.reasoning',
   appTracesExported: 'settings.traces',
   gatewayTracesJoined: 'settings.join',
   appLlmSpansExported: 'settings.llmSpans',
+  presidioInApp: 'settings.presidio',
 }
 
 /**
- * Every sentence a switch can show, as keys under its prefix. They are all
- * rendered, stacked in one cell, so the sentence box is as tall as the longest
- * in every language and width and switching moves nothing below.
+ * Every sentence a switch can show, as keys under its prefix. The off sentence of
+ * the Presidio switch is the notice that says who reads names.
  */
 const SENTENCES: Record<Switch, readonly string[]> = {
-  appTracesExported: ['offSentence', 'onSentence'],
+  appTracesExported: ['offSentence', 'onMaskedSentence', 'onUnmaskedSentence'],
   gatewayTracesJoined: ['offSentence', 'onSentence', 'lockedSentence'],
   appLlmSpansExported: ['offSentence', 'onSentence', 'lockedSentence'],
+  presidioInApp: ['offSentence', 'onSentence'],
+}
+
+const NOTICES: ReadonlySet<string> = new Set(['presidioInApp.offSentence'])
+
+/**
+ * Each choice's key under its setting's `.options`, `.sentences` and `.states`, in the order the toggle offers
+ * them. A choice the contract gains fails to compile here.
+ */
+const CHOICE_KEYS: { [K in Choice]: Record<ChatSettings[K], string> } = {
+  fallback: { OFF: 'off', AFTER_RETRY: 'afterRetry', AT_ONCE: 'atOnce' },
+  reasoning: { OFF: 'off', MEDIUM: 'medium', HIGH: 'high' },
+}
+
+/** The key of a stored choice; none while the settings load, or for a choice this bundle is too old to know. */
+function choiceKey(name: Choice, stored: ChatSettings | undefined): string | undefined {
+  if (stored === undefined) return undefined
+  const keys: Record<string, string> = CHOICE_KEYS[name]
+  return Object.hasOwn(keys, stored[name]) ? keys[stored[name]] : undefined
 }
 
 /**
@@ -58,10 +82,54 @@ const isLocked = (name: Switch, stored: ChatSettings | undefined) =>
 function shownSentence(name: Switch, stored: ChatSettings | undefined): string | undefined {
   if (stored === undefined) return undefined
   if (isLocked(name, stored)) return 'lockedSentence'
-  return stored[name] ? 'onSentence' : 'offSentence'
+  if (!stored[name]) return 'offSentence'
+  // The app's spans are masked only while the app calls Presidio (SwitchedSpanExporter).
+  if (name === 'appTracesExported')
+    return stored.presidioInApp ? 'onMaskedSentence' : 'onUnmaskedSentence'
+  return 'onSentence'
 }
 
-/** A group of panels under a name, such as the switches that decide what Phoenix receives. */
+/**
+ * Every sentence a toggle can show, stacked in one cell with the shown one visible, so the box is as tall as the
+ * longest in every language and width and a change moves nothing below. The shown one carries `id`, which the
+ * toggle is described by. A key in `notices` is drawn as a notice.
+ */
+function Sentences(props: {
+  id: string
+  keys: readonly string[]
+  shown: string | undefined
+  notices?: readonly string[]
+}) {
+  const { t } = useTranslation('chat')
+  return (
+    <Box mt="14px" maxW="60ch" display="grid">
+      {props.keys.map((key) => {
+        const active = key === props.shown
+        return (
+          <Text
+            key={key}
+            id={active ? props.id : undefined}
+            gridArea="1 / 1"
+            textWrap="pretty"
+            visibility={active ? 'visible' : 'hidden'}
+            aria-hidden={active ? undefined : true}
+            {...(props.notices?.includes(key) && {
+              bg: 'bg.muted',
+              borderRadius: 'control',
+              px: '12px',
+              py: '10px',
+              fontSize: '14px',
+            })}
+          >
+            {t(key)}
+          </Text>
+        )
+      })}
+    </Box>
+  )
+}
+
+/** A group of panels under a name, such as the one decision about personal data. */
 function SettingsGroup(props: { title: string; children: ReactNode }) {
   const headingId = useId()
   return (
@@ -93,7 +161,7 @@ function modelChoices(models: readonly string[], stored: ChatSettings | undefine
 /** How long the line under a toggle says it was saved before it goes quiet again. */
 const SAVED_MS = 5000
 
-/** The support-only settings page: the LiteLLM alias the chat asks, whether the app sends its own spans to Phoenix, whether LiteLLM's calls of one question share a trace without them, and whether the app's model span is an LLM span counting the tokens beside LiteLLM's. */
+/** The support-only settings page: the LiteLLM alias the chat asks, when a question goes to that alias's fallback model, whether a question asks the model to reason before it answers, whether the app calls Presidio itself, whether it sends its own spans to Phoenix, whether LiteLLM's calls of one question share a trace without them, and whether the app's model span is an LLM span counting the tokens beside LiteLLM's. */
 export function SettingsPage() {
   const { t } = useTranslation('chat')
   const { t: tCommon } = useTranslation('common')
@@ -206,6 +274,40 @@ export function SettingsPage() {
     )
   }
 
+  const choicePanel = <K extends Choice>(name: K) => {
+    const keys = SETTING_KEYS[name]
+    const optionKeys: Record<string, string> = CHOICE_KEYS[name]
+    const values = Object.keys(optionKeys) as ChatSettings[K][]
+    const shown = choiceKey(name, stored)
+    const headingId = `${name}-heading`
+    const sentenceId = `${name}-sentence`
+    return (
+      <Panel as="section" maxW="640px" aria-labelledby={headingId}>
+        <PanelHead id={headingId} title={t(`${keys}.title`)} />
+        <SegmentedToggle<ChatSettings[K]>
+          label={t(`${keys}.title`)}
+          options={values.map((value) => ({
+            value,
+            label: t(`${keys}.options.${optionKeys[value]}`),
+          }))}
+          value={stored?.[name]}
+          describedBy={shown === undefined ? undefined : sentenceId}
+          busy={isSaving(name)}
+          onChange={(value) => save(name, value)}
+        />
+        <Sentences
+          id={sentenceId}
+          keys={values.map((value) => `${keys}.sentences.${optionKeys[value]}`)}
+          shown={shown === undefined ? undefined : `${keys}.sentences.${shown}`}
+        />
+        {feedback(
+          name,
+          shown === undefined ? (stored?.[name] ?? '') : t(`${keys}.states.${shown}`),
+        )}
+      </Panel>
+    )
+  }
+
   const switchPanel = (name: Switch) => {
     const keys = SETTING_KEYS[name]
     const half: Half | undefined = stored === undefined ? undefined : stored[name] ? 'on' : 'off'
@@ -214,7 +316,11 @@ export function SettingsPage() {
     const sentenceId = `${name}-sentence`
     return (
       <Panel as="section" maxW="640px" aria-labelledby={headingId}>
-        <PanelHead id={headingId} title={t(`${keys}.title`)} />
+        <PanelHead
+          id={headingId}
+          title={t(`${keys}.title`)}
+          subtitle={name === 'presidioInApp' ? t(`${keys}.mechanism`) : undefined}
+        />
         <SegmentedToggle<Half>
           label={t(`${keys}.title`)}
           options={[
@@ -228,32 +334,27 @@ export function SettingsPage() {
           equal
           onChange={(value) => save(name, value === 'on')}
         />
-        <Box mt="14px" maxW="60ch" display="grid">
-          {SENTENCES[name].map((sentence) => {
-            const active = sentence === shown
-            return (
-              <Text
-                key={sentence}
-                id={active ? sentenceId : undefined}
-                gridArea="1 / 1"
-                textWrap="pretty"
-                visibility={active ? 'visible' : 'hidden'}
-                aria-hidden={active ? undefined : true}
-              >
-                {t(`${keys}.${sentence}`)}
-              </Text>
-            )
-          })}
-        </Box>
+        <Sentences
+          id={sentenceId}
+          keys={SENTENCES[name].map((sentence) => `${keys}.${sentence}`)}
+          shown={shown === undefined ? undefined : `${keys}.${shown}`}
+          notices={SENTENCES[name]
+            .filter((sentence) => NOTICES.has(`${name}.${sentence}`))
+            .map((sentence) => `${keys}.${sentence}`)}
+        />
         {feedback(name, half === undefined ? '' : t(`settings.state.${half}`))}
       </Panel>
     )
   }
 
-  /** What the live region says of a saved setting: the model it now asks, or a switch's new sentence. */
+  /** What the live region says of a saved setting: the model it now asks, or the new sentence of a toggle. */
   const savedSentence = (name: Setting) => {
     if (stored === undefined) return undefined
     if (name === 'model') return t('settings.model.chosen', { model: stored.model })
+    if (name === 'fallback' || name === 'reasoning') {
+      const shown = choiceKey(name, stored)
+      return shown === undefined ? undefined : t(`${SETTING_KEYS[name]}.sentences.${shown}`)
+    }
     return t(`${SETTING_KEYS[name]}.${shownSentence(name, stored)}`)
   }
 
@@ -272,6 +373,11 @@ export function SettingsPage() {
         >
           <Box minW="0">
             {modelPanel()}
+            {choicePanel('fallback')}
+            {choicePanel('reasoning')}
+            <SettingsGroup title={t('settings.groups.personalData')}>
+              {switchPanel('presidioInApp')}
+            </SettingsGroup>
             <SettingsGroup title={t('settings.groups.tracing')}>
               {switchPanel('appTracesExported')}
               {switchPanel('gatewayTracesJoined')}

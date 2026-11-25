@@ -35,11 +35,11 @@ class ChatModelTimeoutTests extends RandomPortContext {
 
 	@Test
 	void aModelCallPastTheClientsTimeoutEndsTheQuestionWithTimeout() {
-		modelServer.answer("Hello! How can I help?",
+		modelServer.answer("You have no new tickets.",
 				"{\"prompt_tokens\":1200,\"completion_tokens\":8,\"total_tokens\":1208}", Duration.ofSeconds(2));
 
 		var started = System.nanoTime();
-		var reply = ask("Hello");
+		var reply = ask("Which of our tickets are new?");
 		var took = Duration.ofNanos(System.nanoTime() - started);
 
 		assertThat(reply.names()).containsExactly("error");

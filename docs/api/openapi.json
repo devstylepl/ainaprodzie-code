@@ -38,7 +38,7 @@
               "rate-limited",
               "unavailable",
               "timeout",
-              "personal-data-blocked",
+              "guardrails-blocked",
               "failed"
             ],
             "type" : "string"
@@ -61,11 +61,27 @@
           "mapping" : {
             "done" : "#/components/schemas/ChatDoneEvent",
             "error" : "#/components/schemas/ChatErrorEvent",
-            "token" : "#/components/schemas/ChatTokenEvent"
+            "reasoning" : "#/components/schemas/ChatReasoningEvent",
+            "tickets" : "#/components/schemas/ChatTicketsEvent",
+            "token" : "#/components/schemas/ChatTokenEvent",
+            "tool" : "#/components/schemas/ChatToolCallEvent",
+            "toolStarted" : "#/components/schemas/ChatToolCallStartedEvent"
           },
           "propertyName" : "type"
         },
         "oneOf" : [
+          {
+            "$ref" : "#/components/schemas/ChatReasoningEvent"
+          },
+          {
+            "$ref" : "#/components/schemas/ChatToolCallStartedEvent"
+          },
+          {
+            "$ref" : "#/components/schemas/ChatToolCallEvent"
+          },
+          {
+            "$ref" : "#/components/schemas/ChatTicketsEvent"
+          },
           {
             "$ref" : "#/components/schemas/ChatTokenEvent"
           },
@@ -79,6 +95,12 @@
       },
       "ChatMessageRequest" : {
         "properties" : {
+          "openTicket" : {
+            "description" : "The ticket open on the user's page when they asked, which \"this ticket\" in the question means; absent on any other page",
+            "example" : "RET-1042",
+            "pattern" : "^[Rr][Ee][Tt]-\\d{1,18}$",
+            "type" : "string"
+          },
           "text" : {
             "description" : "1 to 2,000 characters after trimming",
             "maxLength" : 2000,
@@ -105,6 +127,24 @@
         ],
         "type" : "object"
       },
+      "ChatReasoningEvent" : {
+        "properties" : {
+          "text" : {
+            "type" : "string"
+          },
+          "type" : {
+            "enum" : [
+              "reasoning"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "text",
+          "type"
+        ],
+        "type" : "object"
+      },
       "ChatSettings" : {
         "properties" : {
           "appLlmSpansExported" : {
@@ -113,18 +153,40 @@
           "appTracesExported" : {
             "type" : "boolean"
           },
+          "fallback" : {
+            "enum" : [
+              "OFF",
+              "AFTER_RETRY",
+              "AT_ONCE"
+            ],
+            "type" : "string"
+          },
           "gatewayTracesJoined" : {
             "type" : "boolean"
           },
           "model" : {
+            "type" : "string"
+          },
+          "presidioInApp" : {
+            "type" : "boolean"
+          },
+          "reasoning" : {
+            "enum" : [
+              "OFF",
+              "MEDIUM",
+              "HIGH"
+            ],
             "type" : "string"
           }
         },
         "required" : [
           "appLlmSpansExported",
           "appTracesExported",
+          "fallback",
           "gatewayTracesJoined",
-          "model"
+          "model",
+          "presidioInApp",
+          "reasoning"
         ],
         "type" : "object"
       },
@@ -136,13 +198,185 @@
           "appTracesExported" : {
             "type" : "boolean"
           },
+          "fallback" : {
+            "type" : "string"
+          },
           "gatewayTracesJoined" : {
             "type" : "boolean"
           },
           "model" : {
             "type" : "string"
+          },
+          "presidioInApp" : {
+            "type" : "boolean"
+          },
+          "reasoning" : {
+            "type" : "string"
           }
         },
+        "type" : "object"
+      },
+      "ChatTicketListQuery" : {
+        "properties" : {
+          "assigneeId" : {
+            "format" : "uuid",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "authorId" : {
+            "format" : "uuid",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "category" : {
+            "items" : {
+              "enum" : [
+                "BUG",
+                "QUESTION",
+                "FEATURE_REQUEST"
+              ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "createdFrom" : {
+            "format" : "date-time",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "createdTo" : {
+            "format" : "date-time",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "deadlineBefore" : {
+            "format" : "date-time",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "organizationId" : {
+            "format" : "uuid",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "priority" : {
+            "items" : {
+              "enum" : [
+                "LOW",
+                "NORMAL",
+                "HIGH",
+                "CRITICAL"
+              ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "slaBreached" : {
+            "type" : [
+              "boolean",
+              "null"
+            ]
+          },
+          "sort" : {
+            "enum" : [
+              "RECENTLY_UPDATED",
+              "LONGEST_WAITING",
+              "RESPONSE_DEADLINE"
+            ],
+            "type" : "string"
+          },
+          "status" : {
+            "items" : {
+              "enum" : [
+                "NEW",
+                "IN_PROGRESS",
+                "WAITING_FOR_CUSTOMER",
+                "RESOLVED",
+                "CLOSED"
+              ],
+              "type" : "string"
+            },
+            "type" : "array"
+          },
+          "teamId" : {
+            "format" : "uuid",
+            "type" : [
+              "string",
+              "null"
+            ]
+          },
+          "text" : {
+            "type" : [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required" : [
+          "assigneeId",
+          "authorId",
+          "category",
+          "createdFrom",
+          "createdTo",
+          "deadlineBefore",
+          "organizationId",
+          "priority",
+          "slaBreached",
+          "sort",
+          "status",
+          "teamId",
+          "text"
+        ],
+        "type" : "object"
+      },
+      "ChatTicketsEvent" : {
+        "properties" : {
+          "query" : {
+            "anyOf" : [
+              {
+                "$ref" : "#/components/schemas/ChatTicketListQuery"
+              },
+              {
+                "type" : "null"
+              }
+            ]
+          },
+          "tickets" : {
+            "items" : {
+              "$ref" : "#/components/schemas/TicketSummary"
+            },
+            "type" : "array"
+          },
+          "toolCall" : {
+            "description" : "Counts from 0",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "type" : {
+            "enum" : [
+              "tickets"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "query",
+          "tickets",
+          "toolCall",
+          "type"
+        ],
         "type" : "object"
       },
       "ChatTokenEvent" : {
@@ -159,6 +393,56 @@
         },
         "required" : [
           "text",
+          "type"
+        ],
+        "type" : "object"
+      },
+      "ChatToolCallEvent" : {
+        "properties" : {
+          "arguments" : {
+            "additionalProperties" : { },
+            "description" : "The arguments as the model wrote them",
+            "type" : "object"
+          },
+          "tool" : {
+            "example" : "searchTickets",
+            "type" : "string"
+          },
+          "type" : {
+            "enum" : [
+              "tool"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "arguments",
+          "tool",
+          "type"
+        ],
+        "type" : "object"
+      },
+      "ChatToolCallStartedEvent" : {
+        "properties" : {
+          "tool" : {
+            "example" : "searchTickets",
+            "type" : "string"
+          },
+          "toolCall" : {
+            "description" : "Counts from 0",
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "type" : {
+            "enum" : [
+              "toolStarted"
+            ],
+            "type" : "string"
+          }
+        },
+        "required" : [
+          "tool",
+          "toolCall",
           "type"
         ],
         "type" : "object"
@@ -1080,7 +1364,7 @@
     },
     "/api/chat/conversations/{conversationId}/messages" : {
       "post" : {
-        "description" : "The answer is a text/event-stream whose event names are the events' types: token events with the answer text, then done, or error in its place. A failure before the stream starts is an ordinary problem response.",
+        "description" : "The answer is a text/event-stream whose event names are the events' types: reasoning events with the model's reasoning when it returns any, tool events while the model calls tools, each after a toolStarted event when the provider streams the call while the model writes it, a tickets event for each tool call that returned tickets, token events with the answer text, then done, or error in its place. A failure before the stream starts is an ordinary problem response.",
         "operationId" : "ask",
         "parameters" : [
           {
@@ -1161,7 +1445,7 @@
                 }
               }
             },
-            "description" : "Problem type slug: validation (errors[].code field.required or field.too-long)"
+            "description" : "Problem type slug: validation (errors[].code field.required, field.too-long or field.invalid)"
           }
         },
         "summary" : "Ask a question in a conversation and stream the answer",
@@ -1312,7 +1596,7 @@
                 }
               }
             },
-            "description" : "Problem type slug: validation (errors[].code field.required for a blank model, model.unknown)"
+            "description" : "Problem type slug: validation (errors[].code field.required for a blank model, fallback or reasoning, model.unknown, fallback.unknown, reasoning.unknown)"
           }
         },
         "summary" : "Change the chat settings the body names, leaving the others as stored; support only",
@@ -2583,6 +2867,10 @@
       "name" : "tickets"
     },
     {
+      "description" : "Questions about the tickets the signed-in user may see, answered by a model that reads them as that user.",
+      "name" : "chat"
+    },
+    {
       "description" : "Session-cookie authentication. Errors are RFC 9457 problem+json with stable type slugs under https://retrofit.app/problems/.",
       "name" : "auth"
     },
@@ -2597,10 +2885,6 @@
     {
       "description" : "Customer organizations. Support sees all of them, a customer only their own.",
       "name" : "organizations"
-    },
-    {
-      "description" : "Questions to the app's assistant, answered by a model that has no access to the tickets.",
-      "name" : "chat"
     }
   ]
 }

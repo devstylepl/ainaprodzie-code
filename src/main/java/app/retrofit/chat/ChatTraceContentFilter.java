@@ -3,24 +3,30 @@ package app.retrofit.chat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.ai.chat.client.observation.ChatClientObservationContext;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.observation.ChatModelObservationContext;
+import org.springframework.ai.tool.observation.ToolCallingObservationContext;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
 
 import io.micrometer.common.KeyValue;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationFilter;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 
 /// Adds what Spring AI leaves out to the spans of the chat's questions (chat ADR 0007): the prompt's name and version
 /// (chat ADR 0008), the conversation as `session.id`, the caller's id as `user.id`, the texts as [TraceText]
-/// attributes, and the OpenInference span kind, without which Phoenix lists a span's kind as unknown.
+/// attributes, which [MaskingSpanExporter] masks before they leave the app, and the OpenInference span kind, without
+/// which Phoenix lists a span's kind as unknown.
 ///
 /// While the stored `appLlmSpansExported` is off, a model call's span is a `CHAIN` without its token counts and model
 /// names, so only LiteLLM's span of the call counts its tokens and cost (chat ADR 0016). The filter must run after
@@ -72,6 +78,14 @@ final class ChatTraceContentFilter implements ObservationFilter {
 					add(model, TraceText.OUTPUT_MESSAGES, outputMessages(model.getResponse()));
 				}
 			}
+			case ToolCallingObservationContext tool -> {
+				add(tool, SPAN_KIND, "TOOL");
+				add(tool, "gen_ai.tool.name", tool.getToolDefinition().name());
+				add(tool, TraceText.TOOL_CALL_ARGUMENTS, tool.getToolCallArguments());
+				if (tool.getToolCallResult() != null) {
+					add(tool, TraceText.TOOL_CALL_RESULT, tool.getToolCallResult());
+				}
+			}
 			default -> {
 			}
 		}
@@ -79,24 +93,24 @@ final class ChatTraceContentFilter implements ObservationFilter {
 		add(context, "retrofit.prompt.version", systemPrompt.version());
 		add(context, "session.id", question.conversationId());
 		if (question.callerId() != null) {
-			add(context, "user.id", question.callerId());
+			add(context, "user.id", question.callerId().toString());
 		}
 		return context;
 	}
 
 	/// What a span knows of the question it belongs to.
-	private record Question(String conversationId, @Nullable String callerId, boolean llmSpanExported) {
+	private record Question(String conversationId, @Nullable UUID callerId, boolean llmSpanExported) {
 	}
 
 	/// The chat client call this observation is part of, itself or an ancestor, when it is a question of the chat:
-	/// only [ChatService] sets the conversation id. Model calls outside the chat get nothing.
+	/// only [ChatService] sets the conversation id. Model and tool calls outside the chat get nothing.
 	private static @Nullable Question question(Observation.ContextView context) {
 		for (Observation.ContextView current = context; current != null; current = parent(current)) {
 			if (current instanceof ChatClientObservationContext client
 					&& client.getRequest().context().get(ChatMemory.CONVERSATION_ID) instanceof String conversationId) {
-				var callerId = client.getRequest().context().get(ChatService.CALLER_ID);
+				var turn = ChatTurn.find(client.getRequest());
 				var llmSpan = !Boolean.FALSE.equals(client.getRequest().context().get(ChatService.LLM_SPANS_EXPORTED));
-				return new Question(conversationId, callerId instanceof String id ? id : null, llmSpan);
+				return new Question(conversationId, turn == null ? null : turn.caller().id(), llmSpan);
 			}
 		}
 		return null;
@@ -120,7 +134,14 @@ final class ChatTraceContentFilter implements ObservationFilter {
 		var array = json.createArrayNode();
 		for (var message : messages) {
 			var parts = array.addObject().put("role", message.getMessageType().getValue()).putArray("parts");
-			textPart(parts, message.getText());
+			switch (message) {
+				case AssistantMessage assistant -> assistantParts(parts, assistant);
+				case ToolResponseMessage tool -> tool.getResponses().forEach(response -> parts.addObject()
+						.put("type", "tool_call_response")
+						.put("id", response.id())
+						.put("response", response.responseData()));
+				default -> textPart(parts, message.getText());
+			}
 		}
 		return array.toString();
 	}
@@ -130,17 +151,33 @@ final class ChatTraceContentFilter implements ObservationFilter {
 		var array = json.createArrayNode();
 		for (var generation : response.getResults()) {
 			var message = array.addObject().put("role", "assistant");
-			textPart(message.putArray("parts"), generation.getOutput().getText());
+			assistantParts(message.putArray("parts"), generation.getOutput());
 			var finishReason = Objects.requireNonNullElse(generation.getMetadata().getFinishReason(), "");
 			message.put("finish_reason", finishReason.toLowerCase(Locale.ROOT));
 		}
 		return array.toString();
 	}
 
+	private void assistantParts(ArrayNode parts, AssistantMessage message) {
+		textPart(parts, message.getText());
+		message.getToolCalls().forEach(call -> parts.addObject()
+				.put("type", "tool_call")
+				.put("id", call.id())
+				.put("name", call.name())
+				.set("arguments", arguments(call.arguments())));
+	}
+
 	private static void textPart(ArrayNode parts, @Nullable String text) {
 		if (text != null && !text.isEmpty()) {
 			parts.addObject().put("type", "text").put("content", text);
 		}
+	}
+
+	/// Arguments that are not a JSON object stay the text the model wrote.
+	private JsonNode arguments(String arguments) {
+		return ToolCallArguments.parse(json, arguments)
+				.<JsonNode>map(object -> object)
+				.orElseGet(() -> json.getNodeFactory().stringNode(arguments));
 	}
 
 }

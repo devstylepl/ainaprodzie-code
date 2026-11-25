@@ -93,3 +93,17 @@ _Avoid_: Overdue, late ticket
 **Unanswered customer comment**:
 A customer's public comment that is the latest public comment on a ticket in progress after its first response: support staff owe the next public comment. Before the first response the waiting time measures that wait instead.
 _Avoid_: Customer reply, follow-up, new message
+
+## Chat
+
+**Placeholder**:
+The numbered stand-in, such as `<PERSON_1>`, that the chat's model reads instead of a person's name; the user reads the name. It is the form a pseudonym takes: one person has one placeholder throughout a conversation.
+_Avoid_: Mask, tag, token
+
+**Lookalike**:
+A text with the form of a placeholder that the chat did not give out, such as `<PERSON_1>` in a pasted log; the model reads it under a placeholder of its own, and the user reads it back as written.
+_Avoid_: Fake placeholder, escaped placeholder
+
+**Reasoning**:
+The provider's summary of what the model thought through before the answer, not the model's raw thoughts.
+_Avoid_: Thoughts, chain of thought

@@ -28,12 +28,13 @@ import reactor.core.publisher.Flux;
 /// stream's chunks into one response whose usage has no cache read (spring-projects/spring-ai#6667), and it never reads
 /// a cache write from the OpenAI client (`OpenAiChatModel.getDefaultUsage` passes `null`). Remove this class once the
 /// Spring AI release in `pom.xml` fixes #6667 and reads the cache write too: the attributes and the usage carry the same
-/// names, so the traces stay as they are. With #6667 fixed alone, they would lose the cache write.
+/// names, so the traces and the evaluations' report stay as they are. With #6667 fixed alone, they would lose the cache
+/// write.
 ///
 /// The model [#recording] wraps records each chunk's cache read and cache write under the chunk's response id: the
 /// read from its usage, the write as LiteLLM reports it, `cache_creation_input_tokens` in the provider's usage. The
 /// filter then puts both on the model call's observation, as Spring AI's attributes and in the response's usage, which
-/// every handler reads after the filters ran, such as the tracing handler.
+/// every handler reads after the filters ran: the tracing handler, and the evaluations' report.
 ///
 /// The wrapper sees each chunk before Spring AI completes its aggregate and stops the observation, so the entry is
 /// there when the filter runs. Entries of streams that were cancelled or failed are never taken, so the map keeps only

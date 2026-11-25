@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: db-202611151828-chat-setting-fallback
+      author: retrofit
+      context: schema
+      comment: When a chat question goes to the fallback model of its alias, chosen by support staff on the settings page.
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE chat_setting ADD COLUMN fallback text NOT NULL DEFAULT 'AT_ONCE'
+                  CONSTRAINT chat_setting_fallback_check CHECK (fallback IN ('OFF','AFTER_RETRY','AT_ONCE'));
+      rollback:
+        - sql:
+            sql: ALTER TABLE chat_setting DROP COLUMN fallback;

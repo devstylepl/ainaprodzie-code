@@ -1,6 +1,7 @@
 package app.retrofit.chat;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,12 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 class ChatSettingsController {
 
 	private static final String PROBLEM_JSON = "application/problem+json";
+
+	private static final List<String> FALLBACKS = Arrays.stream(Fallback.values()).map(Fallback::name).toList();
+
+	private static final List<String> REASONINGS = Arrays.stream(ReasoningEffort.values())
+			.map(ReasoningEffort::name)
+			.toList();
 
 	private final ChatSettingStore store;
 
@@ -60,13 +67,19 @@ class ChatSettingsController {
 			+ "(not support staff, or missing CSRF token)",
 			content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(implementation = ProblemDetail.class)))
 	@ApiResponse(responseCode = "422", description = "Problem type slug: validation (errors[].code field.required "
-			+ "for a blank model, model.unknown)",
+			+ "for a blank model, fallback or reasoning, model.unknown, fallback.unknown, reasoning.unknown)",
 			content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(implementation = ProblemDetail.class)))
 	@PatchMapping("/settings")
 	ChatSettings change(@RequestBody ChatSettingsChange change) {
 		var errors = new ArrayList<FieldError>();
 		if (change.model() != null) {
 			Validations.requireAllowed(errors, "model", change.model(), models);
+		}
+		if (change.fallback() != null) {
+			Validations.requireAllowed(errors, "fallback", change.fallback(), FALLBACKS);
+		}
+		if (change.reasoning() != null) {
+			Validations.requireAllowed(errors, "reasoning", change.reasoning(), REASONINGS);
 		}
 		Validations.throwIfInvalid(errors);
 		return store.change(change);

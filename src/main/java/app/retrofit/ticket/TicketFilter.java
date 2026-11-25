@@ -26,13 +26,15 @@ import app.retrofit.platform.Validations;
 /// before this instant: those that will be breached by then unless answered, the breached ones included.
 ///
 /// `attention` keeps the tickets one of the desk's counts holds ([TicketCounts]), measured against now.
-record TicketFilter(@Nullable String text, @Nullable UUID organizationId, Set<TicketStatus> statuses,
+///
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketFilter(@Nullable String text, @Nullable UUID organizationId, Set<TicketStatus> statuses,
 		Set<TicketCategory> categories, Set<TicketPriority> priorities, @Nullable UUID teamId,
 		@Nullable UUID assigneeId, @Nullable Boolean slaBreached, @Nullable UUID authorId,
 		@Nullable Instant createdFrom, @Nullable Instant createdTo, @Nullable Instant deadlineBefore,
 		@Nullable Attention attention) {
 
-	TicketFilter {
+	public TicketFilter {
 		text = text == null || text.isBlank() ? null : text.strip();
 		statuses = Set.copyOf(statuses);
 		categories = Set.copyOf(categories);

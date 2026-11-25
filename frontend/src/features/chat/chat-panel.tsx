@@ -1,13 +1,16 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react'
-import { Box, Button, CloseButton, Flex, Heading } from '@chakra-ui/react'
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { Box, Button, CloseButton, Flex, Heading, VisuallyHidden } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
 import { TOUCH_FLOOR } from '../../components/ui/control-style.ts'
 import { Lamp } from '../../components/ui/lamp.tsx'
+import { useSession } from '../auth/use-auth.ts'
 import { ChatComposer } from './chat-composer.tsx'
 import { panelIn } from './chat-motion.ts'
 import { ChatMessageList } from './chat-message-list.tsx'
-import { ChatEmpty } from './chat-empty.tsx'
+import { ChatPrompts } from './chat-prompts.tsx'
+import { ChatTicketContext } from './chat-ticket-context.tsx'
 import { useChatStream } from './use-chat-stream.ts'
+import { useOpenTicket } from './use-open-ticket.ts'
 
 export const CHAT_PANEL_ID = 'chat-panel'
 const TITLE_ID = 'chat-panel-title'
@@ -19,9 +22,12 @@ const TITLE_ID = 'chat-panel-title'
  * nothing before the first question. `data-state` is the conversation's state:
  * `empty`, or the last turn's `streaming`, `answered`, `stopped` or `error`.
  */
-export function ChatPanel(props: { open: boolean; onClose: () => void }) {
+export function ChatPanel(props: { open: boolean; onClose: () => void; onFollowLink: () => void }) {
   const { t } = useTranslation('chat')
+  const roles = useSession().data?.roles ?? []
   const chat = useChatStream()
+  const openTicket = useOpenTicket()
+  const [dismissed, setDismissed] = useState<string>()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -31,7 +37,7 @@ export function ChatPanel(props: { open: boolean; onClose: () => void }) {
     if (props.open) inputRef.current?.focus()
   }, [props.open])
 
-  // The conversation follows its growing end (a new question, the answer
+  // The conversation follows its growing end (a new question, steps, the answer
   // flowing in) while the reader is at the end; scrolled up, they are left there.
   useEffect(() => {
     const scroller = scrollRef.current
@@ -51,11 +57,21 @@ export function ChatPanel(props: { open: boolean; onClose: () => void }) {
     }
   }
 
+  // A removed ticket stays removed while it is open; leaving it forgets the
+  // removal, so the next ticket opened, even the same one, is named again.
+  if (dismissed !== undefined && dismissed !== openTicket?.reference) setDismissed(undefined)
+  const ticket = openTicket?.reference === dismissed ? undefined : openTicket
+
+  const dismissTicket = () => {
+    setDismissed(ticket?.reference)
+    inputRef.current?.focus()
+  }
+
   // A suggested question unmounts the button that asked it, so focus moves to
   // the box the next question goes into instead of falling to the body.
   const ask = (question: string) => {
     following.current = true
-    chat.send(question)
+    chat.send(question, ticket?.reference)
     inputRef.current?.focus()
   }
 
@@ -68,6 +84,11 @@ export function ChatPanel(props: { open: boolean; onClose: () => void }) {
   const onNewConversation = () => {
     chat.reset()
     inputRef.current?.focus()
+  }
+
+  // Every link in the conversation is a ticket link the answer renderer made.
+  const onClick = (event: MouseEvent) => {
+    if (event.target instanceof Element && event.target.closest('a')) props.onFollowLink()
   }
 
   return (
@@ -141,10 +162,13 @@ export function ChatPanel(props: { open: boolean; onClose: () => void }) {
         position="relative"
         px="16px"
         py="14px"
+        onClick={onClick}
         onScroll={onScroll}
       >
         <Box ref={contentRef}>
-          {chat.turns.length === 0 && <ChatEmpty />}
+          {chat.turns.length === 0 && (
+            <ChatPrompts roles={roles} onTicket={ticket !== undefined} onAsk={ask} />
+          )}
           <ChatMessageList turns={chat.turns} onRetry={chat.retry} />
         </Box>
       </Box>
@@ -153,7 +177,26 @@ export function ChatPanel(props: { open: boolean; onClose: () => void }) {
         onSend={ask}
         onStop={chat.stop}
         inputRef={inputRef}
+        context={
+          ticket && (
+            <ChatTicketContext
+              ticket={ticket}
+              onDismiss={dismissTicket}
+              onFollowLink={props.onFollowLink}
+            />
+          )
+        }
+        placeholder={
+          ticket
+            ? t('composer.ticketPlaceholder', { reference: ticket.reference })
+            : t('composer.placeholder')
+        }
       />
+      {/* What the next question is about, said as the open ticket changes; a region
+          of its own, so the row's link and button are not read out with it. */}
+      <VisuallyHidden aria-live="polite">
+        {ticket && t('ticketContext.label', { reference: ticket.reference })}
+      </VisuallyHidden>
     </Flex>
   )
 }

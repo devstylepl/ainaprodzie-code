@@ -1,10 +1,14 @@
 import { useLayoutEffect, useState } from 'react'
-import { Box, Flex, Text, VisuallyHidden } from '@chakra-ui/react'
+import { Box, Flex, Link, Text, VisuallyHidden } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
+import { Link as RouterLink } from 'react-router'
 import { ProblemText } from '../../components/ui/problem-text.tsx'
 import { ChatAnswer } from './chat-answer.tsx'
 import { fadeIn, riseIn } from './chat-motion.ts'
+import { ChatReasoning } from './chat-reasoning.tsx'
+import { ChatTicketRows } from './chat-ticket-rows.tsx'
 import { ChatTrace } from './chat-trace.tsx'
+import { namedTickets } from './ticket-references.ts'
 import type { Turn, TurnError } from './use-chat-stream.ts'
 import { useSmoothText } from './use-smooth-text.ts'
 
@@ -12,7 +16,7 @@ const ERROR_KEYS: Record<TurnError, string> = {
   'rate-limited': 'errors.rate-limited',
   unavailable: 'errors.unavailable',
   timeout: 'errors.timeout',
-  'personal-data-blocked': 'errors.personal-data-blocked',
+  'guardrails-blocked': 'errors.guardrails-blocked',
   failed: 'errors.failed',
   request: 'errors.request',
 }
@@ -66,34 +70,59 @@ function ChatTurn(props: {
       ? (ERROR_KEYS as Record<string, string | undefined>)[turn.error]
       : undefined
   // The guardrail would refuse the same question again, so only a changed one is worth asking.
-  const retryable = turn.status === 'error' && turn.error !== 'personal-data-blocked'
+  const retryable = turn.status === 'error' && turn.error !== 'guardrails-blocked'
 
   return (
     <Flex direction="column" gap="8px">
-      <Box
-        alignSelf="flex-end"
-        maxW="85%"
-        bg="bg.subtle"
-        borderWidth="ink"
-        borderColor="border.control"
-        borderRadius="control"
-        px="12px"
-        py="8px"
-        fontSize="14px"
-        whiteSpace="pre-wrap"
-        overflowWrap="anywhere"
-        transformOrigin="bottom right"
-        {...riseIn()}
-      >
-        <VisuallyHidden>{t('speaker.you')}: </VisuallyHidden>
-        {turn.question}
-      </Box>
+      <Flex direction="column" align="flex-end" gap="4px">
+        <Box
+          maxW="85%"
+          bg="bg.subtle"
+          borderWidth="ink"
+          borderColor="border.control"
+          borderRadius="control"
+          px="12px"
+          py="8px"
+          fontSize="14px"
+          whiteSpace="pre-wrap"
+          overflowWrap="anywhere"
+          transformOrigin="bottom right"
+          {...riseIn()}
+        >
+          <VisuallyHidden>{t('speaker.you')}: </VisuallyHidden>
+          {turn.question}
+        </Box>
+        {/* The page moves on while the conversation stays, so each question keeps the ticket "this" meant. */}
+        {turn.openTicket !== undefined && (
+          <Link
+            asChild
+            color="fg.muted"
+            fontFamily="mono"
+            fontSize="11px"
+            fontWeight="600"
+            letterSpacing="0.06em"
+            textTransform="uppercase"
+            textDecoration="underline"
+            textUnderlineOffset="3px"
+            {...riseIn()}
+          >
+            <RouterLink to={`/tickets/${turn.openTicket}`}>
+              {t('askedOn', { reference: turn.openTicket })}
+            </RouterLink>
+          </Link>
+        )}
+      </Flex>
       <ChatTrace turn={turn} />
+      <ChatReasoning turn={turn} />
       {answer.text !== '' && (
         <Box {...fadeIn}>
           <VisuallyHidden>{t('speaker.chat')}: </VisuallyHidden>
           <ChatAnswer text={answer.text} writing={writing} />
         </Box>
+      )}
+      {/* Once the answer is all on screen, so nothing below the text moves while it is written. */}
+      {!writing && (turn.status === 'answered' || turn.status === 'stopped') && (
+        <ChatTicketRows tickets={namedTickets(turn.answer, turn.tickets)} />
       )}
       {turn.status === 'stopped' && (
         <Text fontSize="13px" color="fg.muted" {...riseIn()}>

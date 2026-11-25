@@ -1,5 +1,7 @@
 package app.retrofit.chat;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -7,9 +9,12 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import app.retrofit.RandomPortContext;
@@ -27,6 +32,9 @@ abstract class ChatServerContext extends RandomPortContext {
 
 	/// The display name of every user [app.retrofit.TestUsers] creates.
 	static final String TEST_USER = "Test User";
+
+	private static final ParameterizedTypeReference<Map<String, Object>> JSON_OBJECT = new ParameterizedTypeReference<>() {
+	};
 
 	@Autowired
 	ScriptedChatModel model;
@@ -54,6 +62,11 @@ abstract class ChatServerContext extends RandomPortContext {
 		return ask(session, conversationId, Map.of("text", text));
 	}
 
+	/// Asks `text` on the page of the ticket `openTicket`, as the SPA does while that ticket is open.
+	Reply askOnTicketPage(String session, UUID conversationId, String openTicket, String text) {
+		return ask(session, conversationId, Map.of("text", text, "openTicket", openTicket));
+	}
+
 	private Reply ask(String session, UUID conversationId, Map<String, String> body) {
 		var csrf = primeCsrf();
 		var response = http().post().uri("/api/chat/conversations/{conversationId}/messages", conversationId)
@@ -76,6 +89,47 @@ abstract class ChatServerContext extends RandomPortContext {
 				.retrieve()
 				.toBodilessEntity()
 				.getStatusCode();
+	}
+
+	/// Raises a ticket as the customer signed in with `session` and returns its reference.
+	String raiseTicket(String session, String title) {
+		return raiseTicket(session, title, "");
+	}
+
+	/// The same, with a description.
+	@SuppressWarnings("unchecked")
+	String raiseTicket(String session, String title, String description) {
+		var response = post(session, "/api/tickets", Map.of("title", title, "description", description));
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+		return (String) ((Map<String, Object>) response.getBody().get("summary")).get("reference");
+	}
+
+	void comment(String session, String reference, String body, boolean internal) {
+		var response = post(session, "/api/tickets/" + reference + "/comments",
+				Map.of("body", body, "internal", internal));
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+	}
+
+	/// The ticket as the REST API answers it to the user signed in with `session`.
+	JsonNode ticket(String session, String reference) {
+		var response = http().get().uri("/api/tickets/{reference}", reference)
+				.header(HttpHeaders.COOKIE, "SESSION=" + session)
+				.retrieve()
+				.toEntity(String.class);
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		return JSON.readTree(response.getBody());
+	}
+
+	private ResponseEntity<Map<String, Object>> post(String session, String path,
+			Map<String, Object> body) {
+		var csrf = primeCsrf();
+		return http().post().uri(path)
+				.header("X-XSRF-TOKEN", csrf.header())
+				.header(HttpHeaders.COOKIE, csrf.cookie() + "; SESSION=" + session)
+				.contentType(MediaType.APPLICATION_JSON)
+				.body(body)
+				.retrieve()
+				.toEntity(JSON_OBJECT);
 	}
 
 	/// One streamed event as the SPA reads it: the SSE event name and its JSON data.

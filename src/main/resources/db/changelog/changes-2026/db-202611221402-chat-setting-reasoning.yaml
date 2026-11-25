@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: db-202611221402-chat-setting-reasoning
+      author: retrofit
+      context: schema
+      comment: Whether a chat question asks the model to reason before it answers, and how hard, chosen by support staff on the settings page.
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE chat_setting ADD COLUMN reasoning text NOT NULL DEFAULT 'OFF'
+                  CONSTRAINT chat_setting_reasoning_check CHECK (reasoning IN ('OFF','MEDIUM','HIGH'));
+      rollback:
+        - sql:
+            sql: ALTER TABLE chat_setting DROP COLUMN reasoning;

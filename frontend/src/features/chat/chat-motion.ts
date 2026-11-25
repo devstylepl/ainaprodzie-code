@@ -25,6 +25,8 @@ const settle = keyframes({
   from: { opacity: 0, transform: 'scale(0.4)' },
   to: { opacity: 1, transform: 'none' },
 })
+// Runs over a path with `pathLength="1"` and `strokeDasharray="1"`.
+const draw = keyframes({ from: { strokeDashoffset: 1 }, to: { strokeDashoffset: 0 } })
 const blink = keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0 } })
 
 const reducedFade = (delay = 0) => ({ animation: `${fade} 150ms linear ${delay}ms both` })
@@ -47,10 +49,17 @@ export const panelIn = {
   _motionReduce: reducedFade(),
 }
 
-/** The spinner of the step the chat is on. */
+/** A step's marker taking its new state. */
 export const settleIn = {
   animation: `${settle} 220ms ${EASE_OUT} both`,
   _motionReduce: reducedFade(),
+}
+
+/** The check of a finished step, drawn once. */
+export const drawIn = {
+  strokeDasharray: '1',
+  animation: `${draw} 320ms ${EASE_OUT} 60ms both`,
+  _motionReduce: { animation: 'none' },
 }
 
 /** The caret at the end of an answer that is still being written. */

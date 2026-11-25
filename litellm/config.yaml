@@ -1,13 +1,16 @@
 model_list:
   # The app's virtual key (litellm/app_key.py) reaches only the aliases in the access group app (chat ADR 0002). An alias
-  # the app calls goes into it, or the app gets 403. It also takes the guardrail personal-data below, or personal data
-  # in a question reaches the provider (chat ADR 0017).
+  # the app calls goes into it, or the app gets 403; the judges stay out, so the app cannot spend on them. It also takes
+  # the guardrail personal-data below, or the pattern data reaches the provider (chat ADR 0017). And
+  # additional_drop_params: ['user'], so the request's user, the caller's id, stays in LiteLLM: Anthropic would take it
+  # as metadata.user_id (chat ADR 0015), and no provider needs it.
   # The alias must contain "gemini", or LiteLLM drops Gemini's thought signatures (chat ADR 0002).
   - model_name: chat-gemini
     litellm_params:
       model: gemini/gemini-3.5-flash-lite
       api_key: os.environ/GEMINI_API_KEY
       guardrails: ['personal-data']
+      additional_drop_params: ['user']
     model_info:
       access_groups: ['app']
   # A stronger model under the same alias.
@@ -16,11 +19,12 @@ model_list:
   #     model: gemini/gemini-3.8-flash
   #     api_key: os.environ/GEMINI_API_KEY
   #     guardrails: ['personal-data']
+  #     additional_drop_params: ['user']
   #   model_info:
   #     access_groups: ['app']
   # Another provider, under its own alias: export ANTHROPIC_API_KEY and choose chat-anthropic on the app's settings
-  # page. Unlike Gemini, Anthropic caches the
-  # prompt only when asked to: the injection point marks the system message (chat ADR 0008).
+  # page. Unlike Gemini, Anthropic caches the prompt only when asked to: the injection point marks the system message,
+  # which caches the tools with it (chat ADR 0008).
   - model_name: chat-anthropic
     litellm_params:
       model: anthropic/claude-haiku-5-5
@@ -29,6 +33,7 @@ model_list:
         - location: message
           role: system
       guardrails: ['personal-data']
+      additional_drop_params: ['user']
     model_info:
       access_groups: ['app']
   # A stronger and costlier model under the same alias.
@@ -40,13 +45,14 @@ model_list:
   #       - location: message
   #         role: system
   #     guardrails: ['personal-data']
+  #     additional_drop_params: ['user']
   #   model_info:
   #     access_groups: ['app']
   # A local model served by Ollama on the host (ollama pull qwen3:8b), with no key and no cost: add chat-local to
-  # retrofit.chat.models in application.yml and choose it on the settings page. On Linux, Ollama must listen beyond loopback (OLLAMA_HOST=0.0.0.0) for the container to
-  # reach it. Ollama's default context holds a few thousand tokens and silently drops the start of a longer request,
-  # the system prompt first, so num_ctx makes room for the prompt and the conversation. It reasons before it answers,
-  # so its timeout outlasts router_settings' 15 seconds.
+  # retrofit.chat.models in application.yml and choose it on the settings page. On Linux, Ollama must listen beyond
+  # loopback (OLLAMA_HOST=0.0.0.0) for the container to reach it. Ollama's default context holds a few thousand tokens and silently drops the start of a longer request,
+  # the system prompt first, so num_ctx makes room for the prompt, the tools and their results. It reasons before it
+  # answers, so its timeout outlasts router_settings' 15 seconds.
   # - model_name: chat-local
   #   litellm_params:
   #     model: ollama_chat/qwen3:8b
@@ -54,31 +60,46 @@ model_list:
   #     num_ctx: 16384
   #     timeout: 120
   #     guardrails: ['personal-data']
+  #     additional_drop_params: ['user']
   #   model_info:
   #     access_groups: ['app']
-  # A fake provider for showing timeouts and retries (chaos/chaos_provider.py): "slow 20", "429", "500" or "2x 500" in
-  # the question says what it does, under router_settings' timeout and retries like any provider.
+  # A fake provider for showing timeouts, retries and fallbacks (chaos/chaos_provider.py): "slow 20", "429", "500" or
+  # "2x 500" in the question says what it does, under router_settings' timeout, retries and fallbacks like any
+  # provider.
   - model_name: chat-chaos
     litellm_params:
       model: openai/chaos
       api_base: http://chaos-provider:8000/v1
       api_key: none
       guardrails: ['personal-data']
+      additional_drop_params: ['user']
     model_info:
       access_groups: ['app']
+  # The judge of the evaluations (chat ADR 0003), never called by the app: a stronger model than the one it grades,
+  # chosen with JUDGE_MODEL. On a free Gemini key gemini-3.8-flash allows about 20 requests a day (README).
+  - model_name: judge-gemini
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/GEMINI_API_KEY
+  - model_name: judge-anthropic
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
 
-# Before a request reaches the provider, Presidio replaces an email address, phone number, IBAN or PESEL in it with
-# its type, such as <EMAIL_ADDRESS>, and blocks a request holding a card number (400 "Blocked entity detected:
-# CREDIT_CARD"), which the chat reads by those words and answers by saying so (chat ADR 0017). Not PERSON: Presidio takes
-# ticket references and product names, such as Taskline, for people. presidio-recognizers.json adds an email under any
-# top-level domain, as Presidio's own misses the demo data's .example; the PESEL comes from the analyzer's
-# presidio/recognizers.yaml.
-# - pre_call only and no output_parse_pii: restoring would buffer the whole stream before the user reads a word.
+# The only layer for e-mail addresses, phone numbers, IBANs and PESELs, in both states of the app's switch (chat ADR
+# 0017): Presidio masks them by their type, such as `<EMAIL_ADDRESS>`, before a request reaches the provider, and
+# blocks a request holding a card number (400 "Blocked entity detected: CREDIT_CARD"), which the chat reads by those
+# words and answers by saying so. The people come from the app's own data (chat ADR 0009). Its entities are the app's
+# but PERSON, because the guardrail cannot be given the app's allow-list, and Presidio takes ticket references and
+# product names for people; its ad hoc recognizers are the app's too (presidio/requests.yaml), and a test holds the
+# two together. The PESEL comes from the analyzer's presidio/recognizers.yaml, with its checksum.
+# - pre_call only and no output_parse_pii: restoring in the gateway would buffer the whole stream, mix up two people of
+#   one type and send restored tool arguments back to the provider unmasked.
 # - It fails closed: when Presidio does not answer within timeout seconds the request fails and nothing reaches the
 #   provider. PRESIDIO_ANALYZER_API_BASE and PRESIDIO_ANONYMIZER_API_BASE in compose.yaml name the two services.
 # - personal_data_guardrail.py is LiteLLM's presidio that takes no part of an IBAN for a card number: Presidio finds
 #   one inside some IBANs, and presidio would refuse a request that holds such an IBAN. It masks the input only: the
-#   answers are what the user may read.
+#   answers are what the user may read, and the app restores its own placeholders.
 guardrails:
   - guardrail_name: personal-data
     litellm_params:
@@ -103,16 +124,26 @@ guardrails:
 #
 # The request metadata (prompt_name, prompt_version, conversation_id) reaches the spans in full under
 # metadata.requester_metadata, and Phoenix filters on it, so no allowlist names the keys. The request's user, the
-# caller's id, is the spans' user.id and LiteLLM's end user; phoenix_callback.py makes conversation_id the session.id.
+# caller's id, is LiteLLM's end user, and phoenix_callback.py makes it the spans' user.id, which the dropped parameter
+# no longer gives them, and conversation_id the session.id.
 litellm_settings:
   callbacks: ['phoenix_callback.handler']
 
 # Each provider call may take 15 seconds and is retried once, rate limits included; the app's own timeout (35s in
 # application.yml) holds both, and its SDK retries once more within the same 35s, so a rate-limited question reaches
 # the provider up to four times (chat ADR 0002).
+#
+# fallbacks names the alias a question goes to when the provider of its own alias fails, with an error or a timeout
+# (chat ADR 0019). The chat's setting Fallback model, on the Settings page, says per request when it is used: the app
+# sends disable_fallbacks for Off, nothing for After a retry, or num_retries 0 for At once, its default. A fallback
+# that fails too answers with the error of the alias that was asked. A request without those fields, as from another
+# caller of this proxy, falls back after the retry.
 router_settings:
   num_retries: 1
   timeout: 15
+  fallbacks:
+    - chat-gemini: ['chat-anthropic']
+    - chat-chaos: ['chat-gemini']
 
 general_settings:
   # The same prompts and answers in the spend logs, the admin UI's Logs.

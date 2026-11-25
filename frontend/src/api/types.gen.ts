@@ -100,7 +100,7 @@ export interface paths {
         put?: never;
         /**
          * Ask a question in a conversation and stream the answer
-         * @description The answer is a text/event-stream whose event names are the events' types: token events with the answer text, then done, or error in its place. A failure before the stream starts is an ordinary problem response.
+         * @description The answer is a text/event-stream whose event names are the events' types: reasoning events with the model's reasoning when it returns any, tool events while the model calls tools, each after a toolStarted event when the provider streams the call while the model writes it, a tickets event for each tool call that returned tickets, token events with the answer text, then done, or error in its place. A failure before the stream starts is an ordinary problem response.
          */
         post: operations["ask"];
         delete?: never;
@@ -353,32 +353,90 @@ export interface components {
         };
         ChatErrorEvent: {
             /** @enum {string} */
-            code: "rate-limited" | "unavailable" | "timeout" | "personal-data-blocked" | "failed";
+            code: "rate-limited" | "unavailable" | "timeout" | "guardrails-blocked" | "failed";
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
             type: "error";
         };
-        ChatEvent: components["schemas"]["ChatTokenEvent"] | components["schemas"]["ChatDoneEvent"] | components["schemas"]["ChatErrorEvent"];
+        ChatEvent: components["schemas"]["ChatReasoningEvent"] | components["schemas"]["ChatToolCallStartedEvent"] | components["schemas"]["ChatToolCallEvent"] | components["schemas"]["ChatTicketsEvent"] | components["schemas"]["ChatTokenEvent"] | components["schemas"]["ChatDoneEvent"] | components["schemas"]["ChatErrorEvent"];
         ChatMessageRequest: {
+            /**
+             * @description The ticket open on the user's page when they asked, which "this ticket" in the question means; absent on any other page
+             * @example RET-1042
+             */
+            openTicket?: string;
             /** @description 1 to 2,000 characters after trimming */
             text: string;
         };
         ChatModels: {
             models: string[];
         };
+        ChatReasoningEvent: {
+            text: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "reasoning";
+        };
         ChatSettings: {
             appLlmSpansExported: boolean;
             appTracesExported: boolean;
+            /** @enum {string} */
+            fallback: "OFF" | "AFTER_RETRY" | "AT_ONCE";
             gatewayTracesJoined: boolean;
             model: string;
+            presidioInApp: boolean;
+            /** @enum {string} */
+            reasoning: "OFF" | "MEDIUM" | "HIGH";
         };
         ChatSettingsChange: {
             appLlmSpansExported?: boolean;
             appTracesExported?: boolean;
+            fallback?: string;
             gatewayTracesJoined?: boolean;
             model?: string;
+            presidioInApp?: boolean;
+            reasoning?: string;
+        };
+        ChatTicketListQuery: {
+            /** Format: uuid */
+            assigneeId: string | null;
+            /** Format: uuid */
+            authorId: string | null;
+            category: ("BUG" | "QUESTION" | "FEATURE_REQUEST")[];
+            /** Format: date-time */
+            createdFrom: string | null;
+            /** Format: date-time */
+            createdTo: string | null;
+            /** Format: date-time */
+            deadlineBefore: string | null;
+            /** Format: uuid */
+            organizationId: string | null;
+            priority: ("LOW" | "NORMAL" | "HIGH" | "CRITICAL")[];
+            slaBreached: boolean | null;
+            /** @enum {string} */
+            sort: "RECENTLY_UPDATED" | "LONGEST_WAITING" | "RESPONSE_DEADLINE";
+            status: ("NEW" | "IN_PROGRESS" | "WAITING_FOR_CUSTOMER" | "RESOLVED" | "CLOSED")[];
+            /** Format: uuid */
+            teamId: string | null;
+            text: string | null;
+        };
+        ChatTicketsEvent: {
+            query: components["schemas"]["ChatTicketListQuery"] | null;
+            tickets: components["schemas"]["TicketSummary"][];
+            /**
+             * Format: int32
+             * @description Counts from 0
+             */
+            toolCall: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tickets";
         };
         ChatTokenEvent: {
             text: string;
@@ -387,6 +445,33 @@ export interface components {
              * @enum {string}
              */
             type: "token";
+        };
+        ChatToolCallEvent: {
+            /** @description The arguments as the model wrote them */
+            arguments: {
+                [key: string]: unknown;
+            };
+            /** @example searchTickets */
+            tool: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tool";
+        };
+        ChatToolCallStartedEvent: {
+            /** @example searchTickets */
+            tool: string;
+            /**
+             * Format: int32
+             * @description Counts from 0
+             */
+            toolCall: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "toolStarted";
         };
         CloseTicketRequest: {
             /** @description At most 2,000 characters; replaces the stored resolution, while a blank or absent one keeps it */
@@ -907,7 +992,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Problem type slug: validation (errors[].code field.required or field.too-long) */
+            /** @description Problem type slug: validation (errors[].code field.required, field.too-long or field.invalid) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1043,7 +1128,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Problem type slug: validation (errors[].code field.required for a blank model, model.unknown) */
+            /** @description Problem type slug: validation (errors[].code field.required for a blank model, fallback or reasoning, model.unknown, fallback.unknown, reasoning.unknown) */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -6,7 +6,7 @@ const CATCH_UP = 0.12
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** The end of the word that contains `index`, so a reveal never splits a word. */
+/** The end of the word that contains `index`, so a reveal never splits a word or a ticket reference. */
 function wordEnd(text: string, index: number): number {
   const space = text.slice(index).search(/\s/)
   return space === -1 ? text.length : index + space

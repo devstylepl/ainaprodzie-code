@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Box, Button, Flex, Link, SkipNavLink, Text, useBreakpointValue } from '@chakra-ui/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Outlet, Link as RouterLink, useLocation, useNavigate } from 'react-router'
@@ -37,7 +38,9 @@ export function AppShell() {
   const { t: tChat } = useTranslation('chat')
   const [chatOpen, setChatOpen] = useState(false)
   const chatToggle = useRef<HTMLButtonElement>(null)
-  // Below `lg` the panel covers the page, which is inert behind it.
+  const mainRef = useRef<HTMLElement>(null)
+  // Below `lg` the panel covers the page: the page is inert behind it, and
+  // following a link closes it to show the ticket.
   const chatCoversPage = useBreakpointValue({ base: true, lg: false }) ?? true
   const navigate = useNavigate()
   const onSettings = useLocation().pathname === '/settings'
@@ -61,6 +64,14 @@ export function AppShell() {
   const closeChat = () => {
     setChatOpen(false)
     chatToggle.current?.focus()
+  }
+
+  // The page stops being inert only once the panel's close is rendered, and
+  // focus can only move to it then.
+  const followChatLink = () => {
+    if (!chatCoversPage) return
+    flushSync(() => setChatOpen(false))
+    mainRef.current?.focus({ preventScroll: true })
   }
 
   return (
@@ -202,18 +213,19 @@ export function AppShell() {
         </Button>
       </Flex>
       <Flex flex="1" minH="0" position="relative">
-        <ChatPanel open={chatOpen} onClose={closeChat} />
+        <ChatPanel open={chatOpen} onClose={closeChat} onFollowLink={followChatLink} />
         {/* Positioned, so absolutely placed content (a visually hidden header) scrolls with it rather than stretching the page. */}
         <Box
           as="main"
           id={MAIN_ID}
+          ref={mainRef}
           tabIndex={-1}
           inert={chatOpen && chatCoversPage}
           flex="1"
           minW="0"
           overflowY="auto"
           position="relative"
-          // Focused by the skip link only, as the h1 is on arrival: no ring.
+          // Focus lands here after a chat link opens a page; the region itself is not a control.
           _focus={{ outline: 'none' }}
         >
           <Box

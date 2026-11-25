@@ -11,19 +11,25 @@ import io.opentelemetry.sdk.common.CompletableResultCode;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 
-/// Lets a batch of the app's spans leave only while the stored switch exports the app's traces. The settings are read
-/// once per batch, at export time, so spans batched before a change leave or drop by the state that holds when they are
-/// exported. Off drops the batch as a success; settings that cannot be read count as off.
+/// Lets a batch of the app's spans leave only while the stored switch exports the app's traces, through Presidio's
+/// masking while the app calls Presidio itself, as they are otherwise. The settings are read once per batch, at export
+/// time, so spans batched before a change leave or drop by the state that holds when they are exported. Off drops the
+/// batch as a success, before the masker sees it, so nothing goes to Presidio either; settings that cannot be read
+/// count as off.
 final class SwitchedSpanExporter implements SpanExporter {
 
 	private static final Logger log = LoggerFactory.getLogger(SwitchedSpanExporter.class);
 
-	private final SpanExporter exporter;
+	private final SpanExporter masked;
+
+	private final SpanExporter unmasked;
 
 	private final Supplier<ChatSettings> settings;
 
-	SwitchedSpanExporter(SpanExporter exporter, Supplier<ChatSettings> settings) {
-		this.exporter = exporter;
+	/// `masked` sends what it masked on to `unmasked`.
+	SwitchedSpanExporter(SpanExporter masked, SpanExporter unmasked, Supplier<ChatSettings> settings) {
+		this.masked = masked;
+		this.unmasked = unmasked;
 		this.settings = settings;
 	}
 
@@ -33,7 +39,7 @@ final class SwitchedSpanExporter implements SpanExporter {
 		if (current == null || !current.appTracesExported()) {
 			return CompletableResultCode.ofSuccess();
 		}
-		return exporter.export(spans);
+		return current.presidioInApp() ? masked.export(spans) : unmasked.export(spans);
 	}
 
 	private @Nullable ChatSettings settings() {
@@ -48,12 +54,12 @@ final class SwitchedSpanExporter implements SpanExporter {
 
 	@Override
 	public CompletableResultCode flush() {
-		return exporter.flush();
+		return masked.flush();
 	}
 
 	@Override
 	public CompletableResultCode shutdown() {
-		return exporter.shutdown();
+		return masked.shutdown();
 	}
 
 }

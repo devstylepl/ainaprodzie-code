@@ -5,15 +5,18 @@ import { jsonResponse, renderElement, stubFetch } from '../../test/harness.tsx'
 import { SettingsPage, SettingsRoute } from './settings-page.tsx'
 
 const OFF_SENTENCE =
-  "Off: only LiteLLM sends traces, one per model call, with the provider model and its cost but without the app's spans."
-const ON_SENTENCE =
-  "On: the app also sends its own spans, and each question shows as one trace with the app's spans and LiteLLM's model calls."
+  'Off: only LiteLLM sends traces, one per model call, with the provider model and its cost but without the tool steps between calls.'
+const ON_MASKED_SENTENCE =
+  "On: the app also sends its own spans, masked by Presidio, and each question shows as one trace with its tool steps and LiteLLM's model calls."
+const ON_UNMASKED_SENTENCE =
+  'On: the app also sends its own spans, unmasked while "Mask personal data in the app" is off, and each question shows as one trace with its tool steps and LiteLLM\'s model calls.'
 
 const SERVER_ERROR = () =>
   jsonResponse({ type: 'about:blank', title: 'Internal Server Error', status: 500 }, 500)
 
 const TRACES = 'App traces to Phoenix'
 const JOIN = 'Group LiteLLM calls per chat message'
+const PRESIDIO = 'Mask personal data in the app'
 
 const JOIN_ON_SENTENCE =
   "On: LiteLLM's calls for one chat message share one trace even while app traces are off. The app's spans never arrive then, so Phoenix lists each call as a row of its own within that trace."
@@ -32,16 +35,44 @@ const LLM_SPANS_LOCKED_SENTENCE =
 const MODEL = 'Model'
 const MODELS = ['chat-gemini', 'chat-anthropic']
 
+const FALLBACK = 'Fallback model'
+const FALLBACK_OFF_SENTENCE =
+  "Off: when the model's provider fails or is too slow, the question is retried, and if that fails too the answer ends with the error."
+const FALLBACK_AT_ONCE_SENTENCE =
+  "At once: when the model's provider fails or is too slow, LiteLLM sends the question to the fallback model that litellm/config.yaml names for the alias, if any, without a retry."
+
+const REASONING = 'Reasoning'
+const REASONING_OFF_SENTENCE = 'Off: the chat does not ask the model to reason before it answers.'
+const REASONING_HIGH_SENTENCE =
+  'High: the chat asks the model to reason before it answers, with high effort. The answer takes longer and costs more tokens.'
+
 const stored = (
   appTracesExported: boolean,
   gatewayTracesJoined = false,
+  presidioInApp = false,
   model = 'chat-gemini',
   appLlmSpansExported = true,
-) => jsonResponse({ appTracesExported, gatewayTracesJoined, appLlmSpansExported, model })
+  fallback = 'AT_ONCE',
+  reasoning = 'OFF',
+) =>
+  jsonResponse({
+    appTracesExported,
+    gatewayTracesJoined,
+    appLlmSpansExported,
+    presidioInApp,
+    model,
+    fallback,
+    reasoning,
+  })
 
 /** Stubs fetch with the configured models after the given routes, which can answer the models first. */
 const stub = (routes: Parameters<typeof stubFetch>[0]) =>
   stubFetch([...routes, ['/api/chat/models', () => jsonResponse({ models: MODELS })]])
+
+const PRESIDIO_ON_SENTENCE =
+  "On: the app replaces the people it knows with placeholders such as <PERSON_1> before the model reads them, and masks its own spans before they leave. E-mail addresses, phone numbers, IBANs and PESELs are LiteLLM's guardrail's, on or off."
+const PRESIDIO_OFF_SENTENCE =
+  "Off: names and other personal data reach the model provider as written, and Phoenix shows them in LiteLLM's traces. Only LiteLLM's guardrail masks e-mail addresses, phone numbers, IBANs and PESELs and refuses a card number, and the app's own spans leave unmasked too while app traces are on."
 
 /** Every sentence of a switch is in the page, stacked; only the shown one is exposed to a reader. */
 const isShown = (text: string) => screen.getByText(text).getAttribute('aria-hidden') === null
@@ -68,23 +99,22 @@ describe('SettingsPage', () => {
     expect(isShown(OFF_SENTENCE)).toBe(true)
   })
 
-  it('names the tracing group holding the three switches, after the model panel', async () => {
+  it('leads with the personal data group holding the Presidio switch, then the tracing group', async () => {
     stub([['/api/chat/settings', () => stored(false)]])
 
     renderElement(<SettingsPage />)
 
-    await half('Off')
-    const tracing = screen
-      .getAllByRole('group')
-      .filter((it) => it.getAttribute('aria-labelledby') !== null)
-    expect(tracing.map((it) => it.textContent?.slice(0, 18))).toEqual(['Tracing in Phoenix'])
-    for (const name of [TRACES, JOIN, LLM_SPANS])
-      expect(within(tracing[0]!).getByRole('group', { name })).toBeTruthy()
-    expect(within(tracing[0]!).queryByRole('group', { name: MODEL })).toBeNull()
-    const model = screen.getByRole('region', { name: MODEL })
-    expect(
-      model.compareDocumentPosition(tracing[0]!) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy()
+    await half('Off', PRESIDIO)
+    const groups = screen.getAllByRole('group').filter((it) => !it.hasAttribute('aria-pressed'))
+    const named = groups.filter((it) => it.getAttribute('aria-labelledby') !== null)
+    expect(named.map((it) => it.textContent?.slice(0, 20))).toEqual([
+      expect.stringContaining('Personal data'),
+      expect.stringContaining('Tracing in Phoenix'),
+    ])
+    expect(within(named[0]!).getByRole('group', { name: PRESIDIO })).toBeTruthy()
+    expect(within(named[1]!).getByRole('group', { name: TRACES })).toBeTruthy()
+    expect(within(named[1]!).getByRole('group', { name: JOIN })).toBeTruthy()
+    expect(within(named[0]!).getByText('Presidio')).toBeTruthy()
   })
 
   it('puts the data-flow window after the switches in reading order', async () => {
@@ -95,6 +125,26 @@ describe('SettingsPage', () => {
     const window = await screen.findByRole('region', { name: "Where the chat's data goes" })
     const last = screen.getByRole('region', { name: LLM_SPANS })
     expect(last.compareDocumentPosition(window) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('says in the notice who reads names while the Presidio switch is off', async () => {
+    stub([['/api/chat/settings', () => stored(false, false, false)]])
+
+    renderElement(<SettingsPage />)
+
+    await half('Off', PRESIDIO)
+    expect(isShown(PRESIDIO_OFF_SENTENCE)).toBe(true)
+    expect(isShown(PRESIDIO_ON_SENTENCE)).toBe(false)
+  })
+
+  it('shows the placeholders sentence while the Presidio switch is on', async () => {
+    stub([['/api/chat/settings', () => stored(false, false, true)]])
+
+    renderElement(<SettingsPage />)
+
+    await half('On', PRESIDIO)
+    expect(isShown(PRESIDIO_ON_SENTENCE)).toBe(true)
+    expect(isShown(PRESIDIO_OFF_SENTENCE)).toBe(false)
   })
 
   it('presses the other half only once the save succeeded and shows its sentence', async () => {
@@ -115,7 +165,27 @@ describe('SettingsPage', () => {
     await userEvent.click(other('On'))
 
     await half('On')
-    expect(isShown(ON_SENTENCE)).toBe(true)
+    expect(isShown(ON_UNMASKED_SENTENCE)).toBe(true)
+  })
+
+  it('says the app traces are masked by Presidio only while Presidio in the app is on', async () => {
+    stub([['/api/chat/settings', () => stored(true, false, true)]])
+
+    renderElement(<SettingsPage />)
+
+    await half('On')
+    expect(isShown(ON_MASKED_SENTENCE)).toBe(true)
+    expect(isShown(ON_UNMASKED_SENTENCE)).toBe(false)
+  })
+
+  it('says the app traces leave unmasked while Presidio in the app is off', async () => {
+    stub([['/api/chat/settings', () => stored(true, false, false)]])
+
+    renderElement(<SettingsPage />)
+
+    await half('On')
+    expect(isShown(ON_UNMASKED_SENTENCE)).toBe(true)
+    expect(isShown(ON_MASKED_SENTENCE)).toBe(false)
   })
 
   it('keeps the saved half pressed when a refetch started before the save answers late', async () => {
@@ -131,6 +201,7 @@ describe('SettingsPage', () => {
               JSON.stringify({
                 appTracesExported: false,
                 gatewayTracesJoined: false,
+                presidioInApp: false,
                 appLlmSpansExported: true,
                 model: 'chat-gemini',
               }),
@@ -245,6 +316,22 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(button('On', JOIN).hasAttribute('disabled')).toBe(false))
   })
 
+  it('sends the Presidio switch alone', async () => {
+    const calls = stub([
+      [
+        '/api/chat/settings',
+        () => (calls.at(-1)?.method === 'PATCH' ? stored(true, false, true) : stored(true)),
+      ],
+    ])
+    renderElement(<SettingsPage />)
+    await half('Off', PRESIDIO)
+
+    await userEvent.click(other('On', PRESIDIO))
+
+    await half('On', PRESIDIO)
+    expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ presidioInApp: true })
+  })
+
   it('disables the app LLM traces switch with the reason while app traces are off', async () => {
     const calls = stub([['/api/chat/settings', () => stored(false)]])
     renderElement(<SettingsPage />)
@@ -264,7 +351,7 @@ describe('SettingsPage', () => {
         '/api/chat/settings',
         () =>
           calls.at(-1)?.method === 'PATCH'
-            ? stored(true, false, 'chat-gemini', false)
+            ? stored(true, false, false, 'chat-gemini', false)
             : stored(true),
       ],
     ])
@@ -286,8 +373,8 @@ describe('SettingsPage', () => {
 
     renderElement(<SettingsPage />)
 
-    await half('Off')
-    for (const name of [MODEL, TRACES, JOIN, LLM_SPANS]) {
+    await half('Off', PRESIDIO)
+    for (const name of [MODEL, PRESIDIO, TRACES, JOIN, LLM_SPANS]) {
       const region = screen.getByRole('region', { name })
       expect(within(region).getByRole('group', { name })).toBeTruthy()
     }
@@ -303,8 +390,9 @@ describe('SettingsPage', () => {
       document.getElementById(
         screen.getByRole('group', { name: group }).getAttribute('aria-describedby') ?? '',
       )?.textContent
-    expect(described(TRACES)).toBe(ON_SENTENCE)
+    expect(described(TRACES)).toBe(ON_UNMASKED_SENTENCE)
     expect(described(JOIN)).toBe(JOIN_LOCKED_SENTENCE)
+    expect(described(PRESIDIO)).toBe(PRESIDIO_OFF_SENTENCE)
   })
 
   it('keeps the old half pressed and shows the problem in the panel of the switch that failed', async () => {
@@ -351,6 +439,7 @@ describe('SettingsPage', () => {
                 JSON.stringify({
                   appTracesExported: exported,
                   gatewayTracesJoined: false,
+                  presidioInApp: false,
                   appLlmSpansExported: true,
                   model: 'chat-gemini',
                 }),
@@ -380,9 +469,11 @@ describe('SettingsPage', () => {
       await waitFor(() => expect(line(TRACES)?.textContent).toBe('Saving…'))
       expect(line(TRACES)?.dataset.state).toBe('saving')
       expect(screen.getByRole('group', { name: TRACES }).getAttribute('aria-busy')).toBe('true')
-      expect(screen.getByRole('group', { name: JOIN }).getAttribute('aria-busy')).not.toBe('true')
-      expect(line(JOIN)).toBeNull()
-      await userEvent.click(other('On', JOIN))
+      expect(screen.getByRole('group', { name: PRESIDIO }).getAttribute('aria-busy')).not.toBe(
+        'true',
+      )
+      expect(line(PRESIDIO)).toBeNull()
+      await userEvent.click(other('On', PRESIDIO))
       expect(calls.filter((call) => call.method === 'PATCH')).toHaveLength(1)
       act(() => release())
       await half('On')
@@ -439,16 +530,186 @@ describe('SettingsPage', () => {
       expect(line(TRACES)?.textContent).toBe('Saved')
       expect(screen.getAllByRole('status')).toHaveLength(1)
       expect(screen.getByRole('status').textContent).toBe(
-        `Saved: App traces to Phoenix. ${ON_SENTENCE}`,
+        `Saved: App traces to Phoenix. ${ON_UNMASKED_SENTENCE}`,
       )
       expect(screen.getByRole('group', { name: TRACES }).getAttribute('aria-busy')).not.toBe('true')
       expect(line(JOIN)).toBeNull()
     })
   })
 
+  describe('fallback model', () => {
+    it('shows the stored choice pressed among the three, between the model and the tracing group, with its sentence', async () => {
+      stub([['/api/chat/settings', () => stored(false)]])
+
+      renderElement(<SettingsPage />)
+
+      await half('At once', FALLBACK)
+      expect(
+        toggle(FALLBACK)
+          .getAllByRole('button')
+          .map((option) => option.textContent),
+      ).toEqual(['Off', 'After a retry', 'At once'])
+      expect(isShown(FALLBACK_AT_ONCE_SENTENCE)).toBe(true)
+      expect(isShown(FALLBACK_OFF_SENTENCE)).toBe(false)
+      expect(
+        document.getElementById(
+          screen.getByRole('group', { name: FALLBACK }).getAttribute('aria-describedby') ?? '',
+        )?.textContent,
+      ).toBe(FALLBACK_AT_ONCE_SENTENCE)
+      const panel = screen.getByRole('region', { name: FALLBACK })
+      expect(
+        screen.getByRole('region', { name: MODEL }).compareDocumentPosition(panel) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        panel.compareDocumentPosition(screen.getByRole('region', { name: TRACES })) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('saves the chosen fallback alone and shows its sentence once the save succeeded', async () => {
+      const calls = stub([
+        [
+          '/api/chat/settings',
+          () =>
+            calls.at(-1)?.method === 'PATCH'
+              ? stored(false, false, false, 'chat-gemini', true, 'OFF')
+              : stored(false),
+        ],
+      ])
+      renderElement(<SettingsPage />)
+      await half('At once', FALLBACK)
+
+      await userEvent.click(other('Off', FALLBACK))
+
+      await half('Off', FALLBACK)
+      expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ fallback: 'OFF' })
+      expect(isShown(FALLBACK_OFF_SENTENCE)).toBe(true)
+      expect(screen.getByRole('status').textContent).toBe(
+        `Saved: Fallback model. ${FALLBACK_OFF_SENTENCE}`,
+      )
+    })
+
+    it('names the choice it is still on when the save fails', async () => {
+      stub([['/api/chat/settings', () => stored(false)]])
+      renderElement(<SettingsPage />)
+      await half('At once', FALLBACK)
+      stub([['/api/chat/settings', SERVER_ERROR]])
+
+      await userEvent.click(button('After a retry', FALLBACK))
+
+      const alert = await within(screen.getByRole('region', { name: FALLBACK })).findByRole('alert')
+      expect(alert.textContent).toBe(
+        'Not saved: "Fallback model" is still set to at once. Something went wrong. Please try again.',
+      )
+      expect(button('At once', FALLBACK).getAttribute('aria-pressed')).toBe('true')
+    })
+
+    it('shows a choice this bundle does not know with no half pressed and no sentence', async () => {
+      stub([
+        ['/api/chat/settings', () => stored(false, false, false, 'chat-gemini', true, 'NEVER')],
+      ])
+
+      renderElement(<SettingsPage />)
+
+      await half('chat-gemini', MODEL)
+      expect(
+        toggle(FALLBACK)
+          .getAllByRole('button')
+          .map((option) => option.getAttribute('aria-pressed')),
+      ).toEqual(['false', 'false', 'false'])
+      expect(isShown(FALLBACK_AT_ONCE_SENTENCE)).toBe(false)
+    })
+  })
+
+  describe('reasoning', () => {
+    const storedReasoning = (reasoning: string) =>
+      stored(false, false, false, 'chat-gemini', true, 'AT_ONCE', reasoning)
+
+    it('shows Off pressed among the three, between the fallback model and the tracing group, with its sentence', async () => {
+      stub([['/api/chat/settings', () => stored(false)]])
+
+      renderElement(<SettingsPage />)
+
+      await half('Off', REASONING)
+      expect(
+        toggle(REASONING)
+          .getAllByRole('button')
+          .map((option) => option.textContent),
+      ).toEqual(['Off', 'Medium', 'High'])
+      expect(isShown(REASONING_OFF_SENTENCE)).toBe(true)
+      expect(isShown(REASONING_HIGH_SENTENCE)).toBe(false)
+      expect(
+        document.getElementById(
+          screen.getByRole('group', { name: REASONING }).getAttribute('aria-describedby') ?? '',
+        )?.textContent,
+      ).toBe(REASONING_OFF_SENTENCE)
+      const panel = screen.getByRole('region', { name: REASONING })
+      expect(
+        screen.getByRole('region', { name: FALLBACK }).compareDocumentPosition(panel) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+      expect(
+        panel.compareDocumentPosition(screen.getByRole('region', { name: TRACES })) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy()
+    })
+
+    it('saves the chosen effort alone and shows its sentence once the save succeeded', async () => {
+      const calls = stub([
+        [
+          '/api/chat/settings',
+          () => (calls.at(-1)?.method === 'PATCH' ? storedReasoning('HIGH') : stored(false)),
+        ],
+      ])
+      renderElement(<SettingsPage />)
+      await half('Off', REASONING)
+
+      await userEvent.click(other('High', REASONING))
+
+      await half('High', REASONING)
+      expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({ reasoning: 'HIGH' })
+      expect(isShown(REASONING_HIGH_SENTENCE)).toBe(true)
+      expect(screen.getByRole('status').textContent).toBe(
+        `Saved: Reasoning. ${REASONING_HIGH_SENTENCE}`,
+      )
+    })
+
+    it('names the choice it is still on when the save fails', async () => {
+      stub([['/api/chat/settings', () => storedReasoning('MEDIUM')]])
+      renderElement(<SettingsPage />)
+      await half('Medium', REASONING)
+      stub([['/api/chat/settings', SERVER_ERROR]])
+
+      await userEvent.click(button('High', REASONING))
+
+      const alert = await within(screen.getByRole('region', { name: REASONING })).findByRole(
+        'alert',
+      )
+      expect(alert.textContent).toBe(
+        'Not saved: "Reasoning" is still set to medium. Something went wrong. Please try again.',
+      )
+      expect(button('Medium', REASONING).getAttribute('aria-pressed')).toBe('true')
+    })
+
+    it('shows a choice this bundle does not know with no half pressed and no sentence', async () => {
+      stub([['/api/chat/settings', () => storedReasoning('XHIGH')]])
+
+      renderElement(<SettingsPage />)
+
+      await half('chat-gemini', MODEL)
+      expect(
+        toggle(REASONING)
+          .getAllByRole('button')
+          .map((option) => option.getAttribute('aria-pressed')),
+      ).toEqual(['false', 'false', 'false'])
+      expect(isShown(REASONING_OFF_SENTENCE)).toBe(false)
+    })
+  })
+
   describe('model', () => {
     it('shows the stored model pressed among the configured aliases, in their order, with its sentence', async () => {
-      stub([['/api/chat/settings', () => stored(false, false, 'chat-anthropic')]])
+      stub([['/api/chat/settings', () => stored(false, false, false, 'chat-anthropic')]])
 
       renderElement(<SettingsPage />)
 
@@ -468,7 +729,7 @@ describe('SettingsPage', () => {
     })
 
     it('still offers a stored model that is no longer configured, pressed after the others', async () => {
-      stub([['/api/chat/settings', () => stored(false, false, 'chat-retired')]])
+      stub([['/api/chat/settings', () => stored(false, false, false, 'chat-retired')]])
 
       renderElement(<SettingsPage />)
 
@@ -497,6 +758,7 @@ describe('SettingsPage', () => {
                         gatewayTracesJoined: true,
                         appLlmSpansExported: true,
                         model: 'chat-anthropic',
+                        fallback: 'AT_ONCE',
                       }),
                     ),
                   )
@@ -647,7 +909,7 @@ describe('SettingsRoute', () => {
 
     renderElement(<SettingsRoute />)
 
-    expect(await screen.findByRole('region', { name: TRACES })).toBeTruthy()
+    expect(await screen.findByRole('region', { name: PRESIDIO })).toBeTruthy()
   })
 
   it('gives a customer the not-found page without asking for the settings', async () => {
@@ -662,7 +924,7 @@ describe('SettingsRoute', () => {
       expect(calls.some((call) => call.url.endsWith('/api/auth/session'))).toBe(true),
     )
     await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(screen.queryByRole('region', { name: TRACES })).toBeNull()
+    expect(screen.queryByRole('region', { name: PRESIDIO })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Settings' })).toBeNull()
     expect(calls.some((call) => call.url.includes('/api/chat/settings'))).toBe(false)
     expect(calls.some((call) => call.url.includes('/api/chat/models'))).toBe(false)

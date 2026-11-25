@@ -6,5 +6,6 @@ import java.util.UUID;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-record NamedRef(@Schema(requiredMode = REQUIRED) UUID id, @Schema(requiredMode = REQUIRED) String name) {
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record NamedRef(@Schema(requiredMode = REQUIRED) UUID id, @Schema(requiredMode = REQUIRED) String name) {
 }

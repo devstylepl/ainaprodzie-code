@@ -6,6 +6,7 @@ import java.util.List;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 
-record TicketPage(@Schema(requiredMode = REQUIRED) List<TicketSummary> items,
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public record TicketPage(@Schema(requiredMode = REQUIRED) List<TicketSummary> items,
 		@Schema(requiredMode = REQUIRED, description = "Tickets on all pages together") long total) {
 }

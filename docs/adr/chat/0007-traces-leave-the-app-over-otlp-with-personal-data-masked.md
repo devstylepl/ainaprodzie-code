@@ -1,0 +1,23 @@
+# Traces leave the app over OTLP, with personal data masked by Presidio
+
+LiteLLM now traces every model call to the same Phoenix project, and the app's own spans leave only while support staff switch them on (chat ADR 0015), masked only while "Mask personal data in the app" is on (chat ADR 0018). What follows describes the app's spans.
+
+The chat is traced from lesson 1, so the cost, the duration and the effect of a prompt change can be seen for each answer. Spring AI's Micrometer observations go through the OpenTelemetry bridge to an OTLP endpoint. The committed `compose.yaml` runs Arize Phoenix there: one container, no account, and its UI on the same port. The app knows only the OTLP endpoint, so any backend that accepts OTLP, Langfuse among them, takes the same spans with a different URL, the way LiteLLM keeps the provider out of the app (chat ADR 0002).
+
+Spring AI puts no prompt or answer text on spans. Its own `log-prompt` and `log-completion` options write that text to the application log, unmasked, so they stay off. The chat's observation filter puts the texts on its spans under the GenAI semantic convention names, and a wrapper around the OTLP exporter sends each of them through Presidio before the batch leaves the app. When Presidio does not answer, the text is replaced by a placeholder: a trace without content is a smaller loss than a trace with a customer's phone number. The wrapper runs on the exporter's background thread, so an answer never waits for Presidio.
+
+Masking covers what leaves the app in a trace, not what the model sees. The user may read their own tickets, and a masked tool result would make the answer wrong. The model reads the people the app knows as numbered pseudonyms instead, which the user reads back in full (chat ADR 0009).
+
+## Considered Options
+
+- **Tracing only in LiteLLM** (its logging callbacks). This was rejected because LiteLLM sees the model calls but not the tools the app runs between them, so one question would show up as unrelated calls without the tool step the lesson is about. LiteLLM traces its model calls beside the app's (chat ADR 0014), in the app's own Phoenix project, and the app's spans join its calls under one trace (chat ADR 0015).
+- **Langfuse as the default backend.** Its self-hosted stack needs ClickHouse, Redis and object storage next to its own PostgreSQL, too much for a participant's laptop. Langfuse Cloud sends every trace to an outside service. Both stay one endpoint away.
+- **Masking in the observation filter.** This was rejected because the filter runs when an observation stops, on the thread of the tool loop, so every tool call would wait for Presidio.
+
+## Consequences
+
+- Presidio's default NLP model is English. Its pattern recognizers (email, phone, IBAN, credit card, and PESEL through Presidio's own recognizer, which `presidio/recognizers.yaml` loads for English, chat ADR 0017) work in Polish text too, but "card ending 4242" and VAT IDs are not found without custom recognizers. Its English model finds most names in Polish text, inflected ones included, though not every one (it missed "Zofia Żółkiewska"), and it takes some words that are no name for a person: Polish phrases such as "Dzień dobry", ticket references where a name could stand, and Taskline and the systems customers connect to it. The allow-list keeps the references and those names out. What the app asks Presidio for, the entities, the custom recognizers, the allow-list and the anonymizer's operator, is in `src/main/resources/presidio/requests.yaml`, in Presidio's own field names, so a new recognizer needs no Java.
+- Once Presidio does not answer one text in time, the rest of its batch leaves as the placeholder without asking Presidio again; the next batch asks again. A Presidio that accepts calls and never answers would otherwise hold the exporter for 2 seconds per text, minutes for a full batch, while the batch span processor's queue fills and drops new spans. A text Presidio refuses still withholds only itself, and a Presidio that is slow but answers still masks every text. A fixed budget for the whole batch was rejected because a busy but working Presidio would then withhold texts.
+- Unmasked texts stay in the app's memory until their batch is exported. A heap dump would contain them, as it contains the tickets themselves.
+- Phoenix converts OTel GenAI attributes since 15.10. Phoenix prices the provider model that LiteLLM's own span names, so the app sets no model name on its spans (chat ADR 0015).
+- Regular tests run without an exporter and with a stub masker. The evaluations (chat ADR 0003) run Presidio in Testcontainers and assert on what would leave the app.

@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent, type Ref } from 'react'
+import { useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 import { Button, chakra, Flex, Text } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
 import { FieldTextarea } from '../../components/ui/form-field.tsx'
@@ -16,11 +16,16 @@ export function ChatComposer({
   onSend,
   onStop,
   inputRef,
+  context,
+  placeholder,
 }: {
   streaming: boolean
   onSend: (question: string) => void
   onStop: () => void
   inputRef: Ref<HTMLTextAreaElement>
+  /** What the next question is about, drawn above the box. */
+  context: ReactNode
+  placeholder: string
 }) {
   const { t } = useTranslation('chat')
   const [text, setText] = useState('')
@@ -53,11 +58,12 @@ export function ChatComposer({
       pt="12px"
       pb="10px"
     >
+      {context}
       <Flex gap="8px" align="flex-end">
         <FieldTextarea
           ref={inputRef}
           aria-label={t('composer.label')}
-          placeholder={t('composer.placeholder')}
+          placeholder={placeholder}
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
@@ -79,7 +85,7 @@ export function ChatComposer({
         )}
       </Flex>
       <Text fontSize="12px" color="fg.muted" mt="8px">
-        {t('noTicketAccess')}
+        {t('readOnly')}
       </Text>
     </chakra.form>
   )

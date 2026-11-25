@@ -8,16 +8,18 @@ enum ChatErrorCode {
 	/// LiteLLM answered 429: the provider's quota is spent for now.
 	RATE_LIMITED("rate-limited"),
 
-	/// LiteLLM cannot be reached, or it or the provider failed with a 5xx.
+	/// LiteLLM cannot be reached, or it or the provider failed with a 5xx, as it does when its Presidio guardrail
+	/// cannot mask a request (chat ADR 0017).
 	UNAVAILABLE("unavailable"),
 
 	/// The model did not answer within the client's timeout.
 	TIMEOUT("timeout"),
 
-	/// LiteLLM's guardrail refused the request for personal data it may not send, a card number (chat ADR 0017).
-	PERSONAL_DATA_BLOCKED("personal-data-blocked"),
+	/// LiteLLM's guardrail refused the request. `personal-data` is the only guardrail that blocks, and a card number
+	/// is all it blocks for (chat ADR 0017).
+	GUARDRAILS_BLOCKED("guardrails-blocked"),
 
-	/// Anything else: an empty answer, an unexpected exception.
+	/// Anything else: an empty answer, the tool-call limit, an unexpected exception.
 	FAILED("failed");
 
 	private final String code;

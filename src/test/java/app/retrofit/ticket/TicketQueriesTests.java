@@ -17,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import app.retrofit.RandomPortContext;
-import app.retrofit.organization.CallerLookup;
 import app.retrofit.platform.ProblemException;
 
 @Transactional
@@ -25,9 +24,6 @@ class TicketQueriesTests extends RandomPortContext {
 
 	@Autowired
 	TicketQueries queries;
-
-	@Autowired
-	CallerLookup callers;
 
 	TicketFixtures fixtures;
 

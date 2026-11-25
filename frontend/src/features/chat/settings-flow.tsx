@@ -13,12 +13,15 @@ import type { ChatSettings } from './use-chat-settings.ts'
 export const FLOW_BESIDE = '@container settings-page (min-width: 1020px)'
 
 /** The stored settings the window draws; the model and the app's LLM spans change no hop. */
-export type FlowSettings = Pick<ChatSettings, 'appTracesExported' | 'gatewayTracesJoined'>
+export type FlowSettings = Pick<
+  ChatSettings,
+  'appTracesExported' | 'gatewayTracesJoined' | 'presidioInApp' | 'fallback'
+>
 
 type NodeId = 'app' | 'presidio' | 'litellm' | 'phoenix' | 'provider'
 
 /** What a hop carries, as the stamp on its edge says it. */
-type Form = 'sent' | 'notSent' | 'asWritten' | 'namesAsWritten'
+type Form = 'sent' | 'notSent' | 'placeholders' | 'masked' | 'asWritten' | 'namesAsWritten'
 
 interface HopState {
   form: Form
@@ -27,6 +30,7 @@ interface HopState {
 }
 
 const HOPS = {
+  appToPresidio: ['app', 'presidio'],
   appToLitellm: ['app', 'litellm'],
   appToPhoenix: ['app', 'phoenix'],
   litellmToPresidio: ['litellm', 'presidio'],
@@ -39,20 +43,39 @@ type HopId = keyof typeof HOPS
 const HOP_IDS = Object.keys(HOPS) as HopId[]
 
 /**
- * What each hop carries for the stored switches (the facts are in chat ADR 0017,
- * `litellm/config.yaml` and `SwitchedSpanExporter`): the app sends a question as
- * written; LiteLLM's guardrail and its copy to Phoenix are always on; the app's
- * spans leave only while app traces are on.
+ * What each hop carries for the stored switches (the facts are in chat ADR 0009,
+ * `litellm/config.yaml` and `SwitchedSpanExporter`): the texts of the app's
+ * spans go to Presidio only while the app masks and exports its spans, and never
+ * a question or a tool result; LiteLLM's guardrail and its copy to Phoenix
+ * are always on; the app's spans leave only while app traces are on, masked
+ * only while the app masks; unless the fallback is off, a request whose provider
+ * fails goes to the fallback model's provider too (chat ADR 0019), under the
+ * sentence keys `placeholdersOrFallback` and `namesAsWrittenOrFallback`.
  */
 function hopStates(s: FlowSettings): Record<HopId, HopState> {
+  const masks = s.presidioInApp
+  const personalData: HopState = masks
+    ? { form: 'placeholders', sentence: 'placeholders' }
+    : { form: 'namesAsWritten', sentence: 'namesAsWritten' }
   return {
-    appToLitellm: { form: 'asWritten', sentence: 'asWritten' },
-    appToPhoenix: s.appTracesExported
-      ? { form: 'asWritten', sentence: 'asWritten' }
-      : { form: 'notSent', sentence: 'notSent' },
+    appToPresidio:
+      masks && s.appTracesExported
+        ? { form: 'sent', sentence: 'sent' }
+        : { form: 'notSent', sentence: 'notSent' },
+    appToLitellm: masks
+      ? { form: 'placeholders', sentence: 'placeholders' }
+      : { form: 'asWritten', sentence: 'asWritten' },
+    appToPhoenix: !s.appTracesExported
+      ? { form: 'notSent', sentence: 'notSent' }
+      : masks
+        ? { form: 'masked', sentence: 'masked' }
+        : { form: 'asWritten', sentence: 'asWritten' },
     litellmToPresidio: { form: 'sent', sentence: 'sent' },
-    litellmToProvider: { form: 'namesAsWritten', sentence: 'namesAsWritten' },
-    litellmToPhoenix: { form: 'namesAsWritten', sentence: 'sent' },
+    litellmToProvider: {
+      form: personalData.form,
+      sentence: s.fallback === 'OFF' ? personalData.sentence : `${personalData.sentence}OrFallback`,
+    },
+    litellmToPhoenix: { form: personalData.form, sentence: 'sent' },
   }
 }
 
@@ -62,11 +85,21 @@ function traceShape(s: FlowSettings): string {
   return s.gatewayTracesJoined ? 'perQuestionModelCalls' : 'perModelCall'
 }
 
+/** Off or not is all a hop tells of the fallback, so one choice stands for the two that fall back. */
 const COMBINATIONS: FlowSettings[] = [false, true].flatMap((appTracesExported) =>
-  [false, true].map((gatewayTracesJoined) => ({ appTracesExported, gatewayTracesJoined })),
+  [false, true].flatMap((gatewayTracesJoined) =>
+    [false, true].flatMap((presidioInApp) =>
+      (['OFF', 'AT_ONCE'] as const).map((fallback) => ({
+        appTracesExported,
+        gatewayTracesJoined,
+        presidioInApp,
+        fallback,
+      })),
+    ),
+  ),
 )
 
-/** Every value a fact can take over the four combinations, which sizes the slot that holds it. */
+/** Every value a fact can take over the combinations, which sizes the slot that holds it. */
 const variants = (pick: (s: FlowSettings) => string): string[] => [
   ...new Set(COMBINATIONS.map(pick)),
 ]
@@ -74,6 +107,8 @@ const variants = (pick: (s: FlowSettings) => string): string[] => [
 const TONES: Record<Form, ChipTone | undefined> = {
   asWritten: 'ink',
   namesAsWritten: 'ink',
+  placeholders: 'neutral',
+  masked: 'neutral',
   sent: 'neutral',
   notSent: undefined,
 }
@@ -136,16 +171,17 @@ function Slot(props: {
 }
 
 // The graph is a grid of five columns (the side node, a gap its edge crosses, the spine, a gap, the side node) and
-// seven rows, each edge drawn from segments inside the cells it crosses.
+// eight rows, each edge drawn from segments inside the cells it crosses.
 const COLUMN = { presidio: 1, gapLeft: 2, spine: 3, gapRight: 4, phoenix: 5 } as const
 const ROW = {
   boundary: 1,
-  app: 2,
-  lane: 3,
-  litellm: 4,
-  stampsBottom: 5,
-  below: 6,
-  provider: 7,
+  stampsTop: 2,
+  app: 3,
+  lane: 4,
+  litellm: 5,
+  stampsBottom: 6,
+  below: 7,
+  provider: 8,
 } as const
 
 /** Whether an edge's words say it is sent; undefined while the settings load. */
@@ -273,8 +309,8 @@ function Node(props: { column: number; row: number; node: NodeId }) {
   )
 }
 
-// The stamps of the two edges in the lane between the App and LiteLLM sit at two heights, the spine's higher, so two
-// wide ones never touch where the columns are narrow.
+// The stamps of the three edges in the lane between the App and LiteLLM sit at two heights, the middle one higher,
+// so two wide ones never touch where the columns are narrow.
 const ON_SPINE = 30
 const ON_SIDE = 70
 
@@ -310,7 +346,7 @@ function FlowGraph(props: { states: Record<HopId, HopState> | undefined }) {
       maxW="520px"
       mx="auto"
       templateColumns="auto minmax(14px, 1fr) auto minmax(14px, 1fr) auto"
-      templateRows="auto auto minmax(72px, auto) auto minmax(44px, auto) minmax(52px, auto) auto"
+      templateRows="auto minmax(28px, auto) auto minmax(72px, auto) auto minmax(44px, auto) minmax(52px, auto) auto"
     >
       <Box
         gridColumn="1 / -1"
@@ -341,11 +377,22 @@ function FlowGraph(props: { states: Record<HopId, HopState> | undefined }) {
         {t('settings.flow.boundary')}
       </Text>
 
+      <Node column={COLUMN.presidio} row={ROW.app} node="presidio" />
       <Node column={COLUMN.spine} row={ROW.app} node="app" />
-      <Node column={COLUMN.presidio} row={ROW.litellm} node="presidio" />
       <Node column={COLUMN.phoenix} row={ROW.litellm} node="phoenix" />
       <Node column={COLUMN.spine} row={ROW.litellm} node="litellm" />
       <Node column={COLUMN.spine} row={ROW.provider} node="provider" />
+
+      {/* App to Presidio, a short way left, its stamp above in the free row. */}
+      <Cell column={COLUMN.gapLeft} row={ROW.app}>
+        <Segment edge="appToPresidio" sent={sent('appToPresidio')} axis="x" />
+        <Head dir="left" sent={sent('appToPresidio')} />
+      </Cell>
+      <Cell column={COLUMN.gapLeft} row={ROW.stampsTop}>
+        <Box position="absolute" bottom="4px" left="50%" transform="translateX(-50%)">
+          {form('appToPresidio') && <Stamp form={form('appToPresidio')!} />}
+        </Box>
+      </Cell>
 
       {/* App to Phoenix: right, then down the Phoenix column. */}
       <Cell column={COLUMN.gapRight} row={ROW.app}>
@@ -368,15 +415,18 @@ function FlowGraph(props: { states: Record<HopId, HopState> | undefined }) {
         <OnEdge form={form('appToLitellm')} at={ON_SPINE} />
       </Cell>
 
-      {/* LiteLLM to Presidio, a short way left, its stamp under it. */}
+      {/* LiteLLM to Presidio: left, then up the Presidio column. */}
       <Cell column={COLUMN.gapLeft} row={ROW.litellm}>
         <Segment edge="litellmToPresidio" sent={alwaysSent} axis="x" />
-        <Head dir="left" sent={alwaysSent} />
       </Cell>
-      <Cell column={COLUMN.presidio} row={ROW.stampsBottom} span={2}>
-        <Box pt="6px" display="flex" justifyContent="flex-start">
-          {form('litellmToPresidio') && <Stamp form={form('litellmToPresidio')!} />}
-        </Box>
+      <Cell column={COLUMN.presidio} row={ROW.litellm}>
+        <Segment edge="litellmToPresidio" sent={alwaysSent} axis="x" a={50} />
+        <Segment edge="litellmToPresidio" sent={alwaysSent} axis="y" b={50} />
+      </Cell>
+      <Cell column={COLUMN.presidio} row={ROW.lane}>
+        <Segment edge="litellmToPresidio" sent={alwaysSent} axis="y" />
+        <Head dir="up" sent={alwaysSent} />
+        <OnEdge form={form('litellmToPresidio')} at={ON_SIDE} />
       </Cell>
 
       {/* LiteLLM to Phoenix, a short way right, its stamp under it. */}

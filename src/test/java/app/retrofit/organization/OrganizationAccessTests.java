@@ -2,7 +2,6 @@ package app.retrofit.organization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -83,7 +82,7 @@ class OrganizationAccessTests extends RandomPortContext {
 
 		assertNotFound(foreign);
 		assertNotFound(unknown);
-		assertThat(withoutInstance(foreign.getBody())).isEqualTo(withoutInstance(unknown.getBody()));
+		assertThat(foreign.getBody()).isEqualTo(unknown.getBody());
 	}
 
 	@Test
@@ -143,12 +142,6 @@ class OrganizationAccessTests extends RandomPortContext {
 	private static void assertNotFound(ResponseEntity<Map<String, Object>> response) {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 		assertThat(response.getBody()).containsEntry("type", PROBLEMS + "organization/not-found");
-	}
-
-	private static Map<String, Object> withoutInstance(Map<String, Object> body) {
-		var copy = new HashMap<>(body);
-		copy.remove("instance");
-		return copy;
 	}
 
 }

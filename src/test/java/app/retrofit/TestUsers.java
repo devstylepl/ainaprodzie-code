@@ -27,6 +27,11 @@ public final class TestUsers {
 	/// An enabled user with a unique mixed-case email, language `en` and a known password. A customer (`USER`) gets
 	/// an organization of their own and support staff (`SUPPORT`) a team of their own, as the schema requires.
 	public TestUser create(Role role) {
+		return create(role, "Test User");
+	}
+
+	/// The same, with the display name that tool results and the chat's directory of people read.
+	public TestUser create(Role role, String displayName) {
 		var id = UUID.randomUUID();
 		var suffix = HexFormat.of().toHexDigits(ThreadLocalRandom.current().nextInt());
 		var email = "Test.User-" + suffix + "@Retrofit.test";
@@ -46,11 +51,12 @@ public final class TestUsers {
 		jdbc.sql("""
 				INSERT INTO app_user (id, email, display_name, password_hash, roles, organization_id, team_id, language,
 				                      created_at, updated_at)
-				VALUES (:id, :email, 'Test User', :passwordHash, ARRAY[:role]::text[], :organizationId, :teamId, 'en',
+				VALUES (:id, :email, :displayName, :passwordHash, ARRAY[:role]::text[], :organizationId, :teamId, 'en',
 				        now(), now())
 				""")
 				.param("id", id)
 				.param("email", email)
+				.param("displayName", displayName)
 				.param("passwordHash", passwordEncoder.encode(PASSWORD))
 				.param("role", role.name())
 				.param("organizationId", role == Role.USER ? affiliationId : null, Types.OTHER)

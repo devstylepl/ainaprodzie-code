@@ -1,7 +1,9 @@
 package app.retrofit.ticket;
 
 /// Spelled exactly as the `ticket_priority_check` constraint spells it.
-enum TicketPriority {
+///
+/// Public because the chat reads tickets through [TicketQueries] from outside this package.
+public enum TicketPriority {
 
 	LOW, NORMAL, HIGH, CRITICAL
 

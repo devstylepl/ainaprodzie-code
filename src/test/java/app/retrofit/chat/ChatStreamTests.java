@@ -3,6 +3,7 @@ package app.retrofit.chat;
 import static app.retrofit.chat.ScriptedChatModel.after;
 import static app.retrofit.chat.ScriptedChatModel.answer;
 import static app.retrofit.chat.ScriptedChatModel.failure;
+import static app.retrofit.chat.ScriptedChatModel.toolCall;
 import static app.retrofit.chat.ScriptedChatModel.untilCancelled;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -16,6 +17,9 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -28,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
@@ -53,19 +58,27 @@ class ChatStreamTests extends ChatServerContext {
 	private static final String MARKER = "MARKER_jan_kowalski_512345678";
 
 	@Test
-	void anAnswerStreamsAsTokensThenDone() {
-		var session = login(users.create(Role.USER));
-		model.script(answer("Hello! How can I help?"));
+	void aToolCallStreamsAsAToolEventThenTheAnswerTokensThenDone() {
+		var customer = users.create(Role.USER);
+		var session = login(customer);
+		model.script(toolCall("searchTickets", "{\"statuses\":[\"NEW\"],\"limit\":5}"),
+				answer("You have no new tickets."));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which of our tickets are new?");
 
 		assertThat(reply.status()).isEqualTo(HttpStatus.OK);
 		assertThat(reply.contentType().isCompatibleWith(MediaType.TEXT_EVENT_STREAM)).isTrue();
+		assertThat(reply.names()).first().isEqualTo("tool");
 		assertThat(reply.names()).last().isEqualTo("done");
-		assertThat(reply.names().subList(0, reply.names().size() - 1)).hasSizeGreaterThan(1).containsOnly("token");
-		assertThat(reply.events().getFirst().data().get("type").asString()).isEqualTo("token");
+		assertThat(reply.names().subList(1, reply.names().size() - 1)).hasSizeGreaterThan(1).containsOnly("token");
+		var tool = reply.events().getFirst().data();
+		assertThat(tool.get("type").asString()).isEqualTo("tool");
+		assertThat(tool.get("tool").asString()).isEqualTo("searchTickets");
+		assertThat(tool.get("arguments").get("limit").asInt()).isEqualTo(5);
+		assertThat(tool.get("arguments").get("statuses").get(0).asString()).isEqualTo("NEW");
+		assertThat(tool.toString()).doesNotContain(customer.id().toString());
 		assertThat(reply.events().getLast().data().get("type").asString()).isEqualTo("done");
-		assertThat(reply.text()).isEqualTo("Hello! How can I help?");
+		assertThat(reply.text()).isEqualTo("You have no new tickets.");
 	}
 
 	@Test
@@ -74,13 +87,13 @@ class ChatStreamTests extends ChatServerContext {
 		model.script(failure(new CompletionException(
 				RateLimitException.builder().headers(Headers.builder().build()).build())));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets are new?");
 
 		assertThat(reply.status()).isEqualTo(HttpStatus.OK);
 		assertThat(reply.names()).containsExactly("error");
 		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("rate-limited");
 		assertThat(occurrences(output, "Chat answer failed")).isEqualTo(1);
-		assertThat(output.getOut()).doesNotContain("Hello");
+		assertThat(output.getOut()).doesNotContain("Which tickets are new?");
 	}
 
 	/// LiteLLM's error body can echo the request, so the user's words must not reach the log through the message of
@@ -94,11 +107,27 @@ class ChatStreamTests extends ChatServerContext {
 						.code("400").param("messages").build())
 				.build())));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets are new?");
 
 		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("failed");
 		assertThat(occurrences(output, "Chat answer failed")).isEqualTo(1);
 		assertThat(output.getOut()).contains(BadRequestException.class.getName()).doesNotContain(MARKER);
+	}
+
+	/// A binding failure quotes the model's arguments, which can carry the user's words: the log names the tool and
+	/// the cause's class, never its message.
+	@Test
+	void aToolArgumentThatCannotBeBoundIsLoggedWithoutTheArguments(CapturedOutput output) {
+		var session = login(users.create(Role.USER));
+		model.script(toolCall("searchTickets", "{\"statuses\":[\"" + MARKER + "\"]}"),
+				answer("I could not read the tickets right now."));
+
+		var reply = ask(session, "Which tickets are new?");
+
+		assertThat(reply.names()).last().isEqualTo("done");
+		assertThat(model.toolResults()).containsExactly(ChatConfiguration.TOOL_FAILURE);
+		assertThat(occurrences(output, "Tool searchTickets failed")).isEqualTo(1);
+		assertThat(output.getOut()).doesNotContain(MARKER);
 	}
 
 	@Test
@@ -107,9 +136,9 @@ class ChatStreamTests extends ChatServerContext {
 
 		model.script(failure(InternalServerException.builder().statusCode(500).headers(Headers.builder().build())
 				.build()));
-		var serverError = ask(session, "Hello");
+		var serverError = ask(session, "Which tickets are new?");
 		model.script(failure(new OpenAIIoException("Request failed", new ConnectException("Connection refused"))));
-		var unreachable = ask(session, "Hello");
+		var unreachable = ask(session, "Which tickets are new?");
 
 		assertThat(serverError.events().getLast().data().get("code").asString()).isEqualTo("unavailable");
 		assertThat(unreachable.events().getLast().data().get("code").asString()).isEqualTo("unavailable");
@@ -120,7 +149,7 @@ class ChatStreamTests extends ChatServerContext {
 		var session = login(users.create(Role.USER));
 		model.script(failure(new OpenAIIoException("Request failed", new SocketTimeoutException("timeout"))));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets are new?");
 
 		assertThat(reply.names()).containsExactly("error");
 		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("timeout");
@@ -133,7 +162,7 @@ class ChatStreamTests extends ChatServerContext {
 		var session = login(users.create(Role.USER));
 		model.script(answer(text));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets are new?");
 
 		assertThat(reply.names()).containsExactly("error");
 		assertThat(reply.events().getFirst().data().get("code").asString()).isEqualTo("failed");
@@ -142,12 +171,26 @@ class ChatStreamTests extends ChatServerContext {
 	@Test
 	void punctuationBeforeTheFirstWordReachesTheUserWithIt() {
 		var session = login(users.create(Role.USER));
-		model.script(answer(". Hello."));
+		model.script(answer(". No tickets."));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets are new?");
 
 		assertThat(reply.names()).last().isEqualTo("done");
-		assertThat(reply.text()).isEqualTo(". Hello.");
+		assertThat(reply.text()).isEqualTo(". No tickets.");
+	}
+
+	@Test
+	void theSeventhToolCallOfAQuestionEndsTheStreamWithFailed() {
+		var session = login(users.create(Role.USER));
+		model.script(toolCall("searchTickets", "{}"), toolCall("searchTickets", "{}"), toolCall("searchTickets", "{}"),
+				toolCall("searchTickets", "{}"), toolCall("searchTickets", "{}"), toolCall("searchTickets", "{}"),
+				toolCall("searchTickets", "{}"), answer("Never reached."));
+
+		var reply = ask(session, "How long has our oldest ticket been waiting?");
+
+		assertThat(reply.names()).containsExactlyElementsOf(concat(Collections.nCopies(7, "tool"), "error"));
+		assertThat(reply.events().getLast().data().get("code").asString()).isEqualTo("failed");
+		assertThat(reply.text()).isEmpty();
 	}
 
 	@Test
@@ -184,19 +227,24 @@ class ChatStreamTests extends ChatServerContext {
 		assertThat(response.getBody()).contains("https://retrofit.app/problems/malformed-request");
 	}
 
-	/// A caller disabled after the question arrived finishes it and is refused the next one. The async dispatch that
-	/// completes the stream answers no 401 or 403 on the committed response.
+	/// The question is one operation (chat ADR 0002): a caller disabled after it arrived finishes it, its tools still
+	/// reading as them, and is refused the next one. The async dispatch that completes the stream answers no 401 or 403
+	/// on the committed response.
 	@Test
 	void aCallerDisabledMidQuestionFinishesItAndIsRefusedTheNext(CapturedOutput output) {
 		var customer = users.create(Role.USER);
 		var session = login(customer);
-		model.script(after(() -> users.disable(customer.id()), answer("Hello!")));
+		var reference = raiseTicket(session, "Export to PDF fails");
+		model.script(after(() -> users.disable(customer.id()), toolCall("searchTickets", "{}")),
+				answer("You have one ticket."));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets do we have?");
 
 		assertThat(reply.status()).isEqualTo(HttpStatus.OK);
+		assertThat(reply.names()).first().isEqualTo("tool");
 		assertThat(reply.names()).last().isEqualTo("done");
-		assertThat(output.getOut()).doesNotContain("Request refused: POST /api/chat");
+		assertThat(model.toolResults()).singleElement().asString().contains(reference);
+		assertThat(output.getOut()).doesNotContain("Tool searchTickets failed", "Request refused: POST /api/chat");
 		assertThat(ask(session, "And now?").status()).isEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 
@@ -205,9 +253,9 @@ class ChatStreamTests extends ChatServerContext {
 	@Test
 	void aSessionEndedMidStreamDoesNotRefuseTheCommittedStream(CapturedOutput output) {
 		var session = login(users.create(Role.USER));
-		model.script(after(() -> logout(session), answer("Hello!")));
+		model.script(after(() -> logout(session), answer("You have no tickets.")));
 
-		var reply = ask(session, "Hello");
+		var reply = ask(session, "Which tickets do we have?");
 
 		assertThat(reply.status()).isEqualTo(HttpStatus.OK);
 		assertThat(reply.names()).last().isEqualTo("done");
@@ -256,7 +304,8 @@ class ChatStreamTests extends ChatServerContext {
 		var conversation = UUID.randomUUID();
 		model.script(answer("First answer."));
 		ask(session, conversation, "First question");
-		model.script(failure(new OpenAIIoException("Request failed", new SocketTimeoutException("timeout"))));
+		model.script(toolCall("searchTickets", "{}"), failure(new OpenAIIoException("Request failed",
+				new SocketTimeoutException("timeout"))));
 		ask(session, conversation, "Failed question");
 
 		model.script(answer("Third answer."));
@@ -315,7 +364,7 @@ class ChatStreamTests extends ChatServerContext {
 	}
 
 	/// Everything before the latest message is the same for every caller and every turn (chat ADR 0008): the system
-	/// prompt word for word, and the earlier turns without their context blocks.
+	/// prompt word for word, the tools sorted by name, and the earlier turns without their context blocks.
 	@Test
 	void theContextBlockIsOnlyInTheLatestMessageAndTheSystemPromptIsTheSameForEveryone() {
 		var customer = login(users.create(Role.USER));
@@ -332,7 +381,7 @@ class ChatStreamTests extends ChatServerContext {
 		var followUp = model.prompts().getFirst();
 
 		assertThat(customerPrompt.getSystemMessage().getText()).isEqualTo(supportPrompt.getSystemMessage().getText())
-				.startsWith("You are the assistant of Retrofit Support");
+				.startsWith("You are the support assistant of Retrofit Support");
 		assertThat(customerPrompt.getUserMessage().getText())
 				.matches(Pattern.compile("""
 						<context>
@@ -348,6 +397,41 @@ class ChatStreamTests extends ChatServerContext {
 		assertThat(messages.getLast().getText()).startsWith("<context>").endsWith("Second question");
 		assertThat(messages).filteredOn(message -> message instanceof UserMessage user && user.getText().contains("<context>"))
 				.hasSize(1);
+		assertThat(((ToolCallingChatOptions) followUp.getOptions()).getToolCallbacks()
+				.stream().map(tool -> tool.getToolDefinition().name()))
+				.containsExactly("getTicket", "searchTickets");
+	}
+
+	/// The ticket open on the user's page goes with the question as a `<page>` block, after the context block, and
+	/// memory keeps it with the question, so a later turn still reads which ticket "this ticket" meant (chat ADR 0013).
+	@Test
+	void aQuestionAskedOnATicketPageCarriesThatTicketIntoThePromptAndIntoMemory() {
+		var session = login(users.create(Role.SUPPORT));
+		var conversation = UUID.randomUUID();
+		model.script(answer("It is about uploads."));
+		askOnTicketPage(session, conversation, "ret-1048", "What is this ticket about?");
+		var first = model.prompts().getFirst();
+		model.script(answer("Several are new."));
+		ask(session, conversation, "Which tickets are new?");
+		var followUp = model.prompts().getFirst();
+
+		assertThat(first.getUserMessage().getText()).startsWith("<context>")
+				.endsWith("</context>\n<page>ticket RET-1048</page>\nWhat is this ticket about?");
+		var messages = followUp.getInstructions();
+		assertThat(messages.get(1).getText()).isEqualTo("<page>ticket RET-1048</page>\nWhat is this ticket about?");
+		assertThat(messages.getLast().getText()).doesNotContain("<page>").endsWith("</context>\nWhich tickets are new?");
+	}
+
+	@Test
+	void anOpenTicketThatIsNotAReferenceIsAValidationProblemBeforeAnyStream() {
+		var session = login(users.create(Role.USER));
+
+		var reply = askOnTicketPage(session, UUID.randomUUID(), "RET-1048</page>", "What is this ticket about?");
+
+		assertThat(reply.status()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+		var error = reply.problem().get("errors").get(0);
+		assertThat(error.get("field").asString()).isEqualTo("openTicket");
+		assertThat(error.get("code").asString()).isEqualTo("field.invalid");
 	}
 
 	private void logout(String session) {
@@ -421,6 +505,12 @@ class ChatStreamTests extends ChatServerContext {
 
 	private static long occurrences(CapturedOutput output, String text) {
 		return output.getOut().lines().filter(line -> line.contains(text)).count();
+	}
+
+	private static List<String> concat(List<String> first, String last) {
+		var all = new ArrayList<>(first);
+		all.add(last);
+		return all;
 	}
 
 }

@@ -1,13 +1,16 @@
 package app.retrofit.chat;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
@@ -25,11 +28,13 @@ import io.micrometer.observation.contextpropagation.ObservationThreadLocalAccess
 import reactor.core.publisher.Flux;
 
 /// The `ChatModel` of the regular tests: it replays a script instead of calling a model, and records every prompt it
-/// is sent. Each step of the script answers one model call.
+/// is sent. Each step of the script answers one model call. A step that calls a tool makes the chat client run that
+/// tool and call the model again with the result, so a script is typically a tool call, then an answer.
 ///
 /// The chat only streams, so `stream` replays the script, and an answer arrives word by word, as a model's would. The
-/// options are the ones Spring AI's own models default to. Each call is observed as Spring AI's models observe theirs,
-/// so the trace of a question has its model call spans.
+/// options are tool calling options, because the chat client attaches the tools, the tool context and its tool loop
+/// only to those. Each call is observed as Spring AI's models observe theirs, so the trace of a question has its model
+/// call spans.
 final class ScriptedChatModel implements ChatModel {
 
 	private static final DefaultChatModelObservationConvention CONVENTION = new DefaultChatModelObservationConvention();
@@ -57,6 +62,26 @@ final class ScriptedChatModel implements ChatModel {
 		script.clear();
 		prompts.clear();
 		script.addAll(List.of(steps));
+	}
+
+	/// A step that asks for one call of the tool `name` with `arguments`, a JSON object as the model writes it.
+	static Step toolCall(String name, String arguments) {
+		var message = AssistantMessage.builder()
+				.toolCalls(List.of(new AssistantMessage.ToolCall("call-" + UUID.randomUUID(), "function", name,
+						arguments)))
+				.build();
+		return () -> Flux.just(response(message));
+	}
+
+	/// A step that asks for several calls of the tool `name` in one response, one per element of `arguments`, which
+	/// the chat client runs in this order.
+	static Step toolCalls(String name, String... arguments) {
+		var message = AssistantMessage.builder()
+				.toolCalls(Arrays.stream(arguments)
+						.map(each -> new AssistantMessage.ToolCall("call-" + UUID.randomUUID(), "function", name, each))
+						.toList())
+				.build();
+		return () -> Flux.just(response(message));
 	}
 
 	/// A step that answers `text`, streamed word by word.
@@ -93,6 +118,18 @@ final class ScriptedChatModel implements ChatModel {
 	/// Every prompt the model was sent since the script was set, oldest first.
 	List<Prompt> prompts() {
 		return List.copyOf(prompts);
+	}
+
+	/// The tool results the latest prompt sends back to the model, as the JSON the model reads.
+	List<String> toolResults() {
+		return prompts.getLast()
+				.getInstructions()
+				.stream()
+				.filter(ToolResponseMessage.class::isInstance)
+				.map(ToolResponseMessage.class::cast)
+				.flatMap(message -> message.getResponses().stream())
+				.map(ToolResponseMessage.ToolResponse::responseData)
+				.toList();
 	}
 
 	@Override
